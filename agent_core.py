@@ -46,6 +46,29 @@ Return a professional report."""
 Include:
 Overview | Project Structure | Installation | Requirements | Usage | Architecture | Folder Structure | API | Classes | Functions | Configuration | Future Improvements"""
 
+    CICD_PROMPT = """You are a Senior DevOps Engineer.
+Analyze the uploaded/scanned codebase.
+Generate production-ready CI/CD configuration files tailored to the detected tech stack.
+
+You MUST format your response as a collection of separate file blocks. For each file you generate, start with a header exactly in the format:
+### File: <relative_filepath>
+followed by the code block.
+
+Include:
+1. ### File: Dockerfile
+Generate a production-ready, multi-stage build Dockerfile. Make sure it runs as a non-root user for security and pins specific versions of base images.
+2. ### File: docker-compose.yml
+Generate a docker-compose.yml configuration with appropriate volume mounting, port mapping, environment variables, restart policies, and resource constraints/limits.
+3. ### File: .github/workflows/ci.yml
+Generate a GitHub Actions workflow for Continuous Integration (CI) that runs linting, formatting check, and automated tests. Use dependency caching for faster run times.
+4. ### File: .github/workflows/cd.yml
+Generate a GitHub Actions workflow for Continuous Deployment (CD) that builds the Docker image and pushes/deploys it to a production target using secure secrets.
+5. ### File: README_CICD.md
+Generate a README file describing the deployment architecture, required repository secrets (e.g., credentials, tokens), local run instructions, and production recommendations.
+
+Ensure all configurations match the language, framework, dependencies, and requirements found in the analyzed code."""
+
+
     @staticmethod
     def list_available_models() -> list:
         try:
@@ -121,6 +144,9 @@ Overview | Project Structure | Installation | Requirements | Usage | Architectur
 
     def document_code(self, code: str) -> str:
         return self._generate_local_response(self.DOCUMENT_PROMPT, code)
+
+    def generate_cicd(self, code: str) -> str:
+        return self._generate_local_response(self.CICD_PROMPT, code)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:

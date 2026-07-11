@@ -3,6 +3,7 @@ import hashlib
 import streamlit as st
 from agent_core import LocalCodeAgentEngine
 import concurrent.futures
+from generators.cicd_generator import parse_cicd_output, create_cicd_zip, evaluate_production_score
 
 # Initialize session state cache
 st.session_state.setdefault("llm_cache", {})
@@ -93,6 +94,92 @@ def _trim_payload(text: str, max_chars: int) -> str:
     if not trimmed_blocks:
         return text[:max_chars]
     return "\n".join(trimmed_blocks)
+
+def detect_project_stack(payload: str) -> dict:
+    """
+    Parses the codebase payload to detect Language, Framework, Inference, Deployment Target, and Package Manager.
+    """
+    detected = {
+        "Language": "Unknown",
+        "Framework": "None Detected",
+        "Inference": "None Detected",
+        "Deployment": "Local",
+        "PackageManager": "None",
+        "Recommendation": "Docker + GitHub Actions"
+    }
+    
+    if not payload:
+        return detected
+
+    payload_lower = payload.lower()
+
+    # 1. Detect Language & Package Manager
+    has_python = ".py" in payload_lower or "requirements.txt" in payload_lower or "pyproject.toml" in payload_lower
+    has_nodejs = "package.json" in payload_lower or ".js" in payload_lower or ".ts" in payload_lower
+    has_java = ".java" in payload_lower or "pom.xml" in payload_lower or "build.gradle" in payload_lower
+
+    if has_python:
+        detected["Language"] = "Python"
+        detected["PackageManager"] = "pip"
+        if "pyproject.toml" in payload_lower:
+            detected["PackageManager"] = "poetry"
+    elif has_nodejs:
+        detected["Language"] = "JavaScript/TypeScript"
+        detected["PackageManager"] = "npm"
+        if "yarn.lock" in payload_lower:
+            detected["PackageManager"] = "yarn"
+        elif "pnpm-lock.yaml" in payload_lower:
+            detected["PackageManager"] = "pnpm"
+    elif has_java:
+        detected["Language"] = "Java"
+        if "pom.xml" in payload_lower:
+            detected["PackageManager"] = "Maven"
+        else:
+            detected["PackageManager"] = "Gradle"
+
+    # 2. Detect Frameworks
+    frameworks = []
+    if "streamlit" in payload_lower:
+        frameworks.append("Streamlit")
+    if "flask" in payload_lower:
+        frameworks.append("Flask")
+    if "django" in payload_lower:
+        frameworks.append("Django")
+    if "fastapi" in payload_lower:
+        frameworks.append("FastAPI")
+    if "react" in payload_lower or "import react" in payload_lower or '"react"' in payload_lower:
+        frameworks.append("React")
+
+    if frameworks:
+        detected["Framework"] = ", ".join(frameworks)
+
+    # 3. Detect Inference
+    if "ollama" in payload_lower:
+        detected["Inference"] = "Ollama"
+    elif "openai" in payload_lower:
+        detected["Inference"] = "OpenAI API"
+    elif "transformers" in payload_lower or "torch" in payload_lower:
+        detected["Inference"] = "HuggingFace/PyTorch"
+
+    # 4. Deployment & Recommendation
+    primary_fw = frameworks[0] if frameworks else "Streamlit"
+    
+    recs = {
+        "Streamlit": "Docker + GitHub Actions",
+        "Flask": "Docker + Nginx",
+        "FastAPI": "Docker + Uvicorn",
+        "React": "GitHub Pages or Vercel",
+        "Django": "Docker + Gunicorn"
+    }
+    
+    detected["Recommendation"] = recs.get(primary_fw, "Docker + GitHub Actions")
+    
+    if detected["Inference"] == "Ollama":
+        detected["Deployment"] = "Local"
+    else:
+        detected["Deployment"] = "Cloud"
+
+    return detected
 
 # ---------------------------------------------------------------------------
 # OPTIMIZATION: Helper to run a single LLM task in a background thread.
@@ -235,11 +322,28 @@ with col1:
             except Exception as err:
                 st.error(f"Error checking directory: {err}")
 
+    # Detected stack summary display
+    if final_code_payload.strip():
+        st.markdown("---")
+        st.subheader("🔍 Detected Architecture Stack")
+        stack = detect_project_stack(final_code_payload)
+        
+        m1, m2 = st.columns(2)
+        with m1:
+            st.markdown(f"**Language:** `{stack['Language']}`")
+            st.markdown(f"**Framework:** `{stack['Framework']}`")
+            st.markdown(f"**Inference:** `{stack['Inference']}`")
+        with m2:
+            st.markdown(f"**Deployment:** `{stack['Deployment']}`")
+            st.markdown(f"**Package Manager:** `{stack['PackageManager']}`")
+            st.markdown(f"**Recommendation:** `{stack['Recommendation']}`")
+
     # Task toggles
     st.markdown("### Execution Tasks")
     do_review = st.checkbox("Review Code (Audit & Security)", value=True)
     do_analyze = st.checkbox("Analyze Code (Complexity & Flow)", value=False)
     do_document = st.checkbox("Document Code (README Generation)", value=False)
+    do_cicd = st.checkbox("Generate CI/CD Pipeline", value=False)
 
     execute = st.button("🚀 Execute Pipeline", use_container_width=True, type="primary")
 
@@ -254,7 +358,7 @@ with col2:
     else:
         if not final_code_payload.strip():
             st.warning("⚠️ Please provide source code in the buffer before executing.")
-        elif not any([do_review, do_analyze, do_document]):
+        elif not any([do_review, do_analyze, do_document, do_cicd]):
             st.warning("Please select at least one execution task.")
         else:
             active_code_payload = final_code_payload
@@ -280,6 +384,8 @@ with col2:
                 task_configs.append(("Analysis", engine.ANALYSIS_PROMPT, "### 🏗️ Architecture & Complexity Analysis"))
             if do_document:
                 task_configs.append(("Documentation", engine.DOCUMENT_PROMPT, "### 📝 Technical Documentation"))
+            if do_cicd:
+                task_configs.append(("CI/CD", engine.CICD_PROMPT, "### 🚀 CI/CD Pipeline"))
 
             start_total = time.perf_counter()
             timing_data = {"Total Processing Time": 0.0}
@@ -314,6 +420,49 @@ with col2:
                             mime="text/markdown",
                             use_container_width=True
                         )
+                    elif task_name == "CI/CD":
+                        cicd_files = parse_cicd_output(full_task_text)
+                        zip_bytes = create_cicd_zip(cicd_files)
+                        prod_score = evaluate_production_score(cicd_files, full_task_text)
+                        
+                        st.download_button(
+                            label="📥 Download CI/CD Package (ZIP)",
+                            data=zip_bytes,
+                            file_name="cicd.zip",
+                            mime="application/zip",
+                            use_container_width=True
+                        )
+                        
+                        st.markdown("#### 📊 CI/CD Report")
+                        has_docker = any("dockerfile" in f.lower() for f in cicd_files.keys())
+                        has_github_actions = any("ci.yml" in f.lower() or "cd.yml" in f.lower() for f in cicd_files.keys())
+                        has_secrets = "secret" in full_task_text.lower() or "secrets." in full_task_text.lower()
+                        has_steps = "step" in full_task_text.lower() or "deploy" in full_task_text.lower()
+                        
+                        col_chk1, col_chk2 = st.columns(2)
+                        with col_chk1:
+                            if has_docker:
+                                st.success("✔ **Docker Ready**")
+                            else:
+                                st.error("❌ **Docker Missing**")
+                            if has_github_actions:
+                                st.success("✔ **GitHub Actions Ready**")
+                            else:
+                                st.error("❌ **GitHub Actions Missing**")
+                        with col_chk2:
+                            if has_secrets:
+                                st.success("✔ **Secrets Required**")
+                            else:
+                                st.warning("⚠ **Secrets Not Specified**")
+                            if has_steps:
+                                st.success("✔ **Deployment Steps Outlined**")
+                            else:
+                                st.warning("⚠ **Deployment Steps Missing**")
+                                
+                        st.metric(label="Production Score", value=f"{prod_score}/100")
+                        
+                        stack = detect_project_stack(active_code_payload)
+                        st.info(f"💡 **Deployment Recommendation:** Deploy using **{stack['Recommendation']}** for this {stack['Framework']} project.")
 
             total_elapsed = time.perf_counter() - start_total
             
