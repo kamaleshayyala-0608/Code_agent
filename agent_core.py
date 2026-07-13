@@ -70,12 +70,18 @@ Ensure all configurations match the language, framework, dependencies, and requi
  
  
     REFACTOR_PROMPT = """You are an expert Software Engineer specializing in code quality, refactoring, and clean code.
-Analyze the provided code and suggest refactoring improvements.
-For the refactoring suggestions, provide:
-- **Code Quality Issues**: Identify bad smells, DRY violations, or styling issues.
-- **Refactoring Strategy**: Explain the concrete steps to refactor.
-- **Clean/Refactored Implementation**: Provide the refactored code block with descriptions of changes made.
-Return the suggestions in structured Markdown."""
+Analyze the provided codebase and suggest refactoring improvements.
+
+You MUST format your response as a collection of separate file blocks.
+1. The first block must contain a comprehensive report describing all code smells, DRY violations, SOLID violations, and the refactoring strategy for the files. Use this header exactly:
+### File: refactoring_report.md
+followed by your report.
+
+2. For each source file you refactor, output a block starting exactly with this header:
+### File: <relative_filepath>
+followed by a fenced code block containing the fully refactored, production-ready code.
+
+Ensure all refactored implementations compile, retain original logic behavior, and improve clean code metrics."""
 
 
     @staticmethod

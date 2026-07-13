@@ -147,3 +147,32 @@ def evaluate_production_score(files: dict, text: str) -> int:
         score = max(score, 50)
         
     return min(score, 100)
+
+def parse_refactor_output(text: str) -> dict:
+    """
+    Parses the generated refactoring suggestions text and extracts refactored source files.
+    """
+    files = {}
+    pattern = r"###\s*File:\s*([^\n\r]+)[\s\S]*?```[a-zA-Z0-9_-]*\n([\s\S]*?)```"
+    matches = re.findall(pattern, text)
+    
+    for filepath, content in matches:
+        filepath = filepath.strip()
+        filepath = re.sub(r'[*`_]', '', filepath)
+        files[filepath] = content.strip()
+        
+    # Also add/ensure the full text is saved as refactoring_report.md
+    files["refactoring_report.md"] = text
+    return files
+
+def create_refactor_zip(files: dict) -> bytes:
+    """
+    Assembles a ZIP file in-memory containing the refactored code and report.
+    """
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for filepath, content in files.items():
+            clean_path = filepath.replace("\\", "/")
+            zip_file.writestr(clean_path, content)
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()

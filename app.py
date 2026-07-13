@@ -3,7 +3,7 @@ import hashlib
 import streamlit as st
 from agent_core import LocalCodeAgentEngine
 import concurrent.futures
-from generators.cicd_generator import parse_cicd_output, create_cicd_zip, evaluate_production_score
+from generators.cicd_generator import parse_cicd_output, create_cicd_zip, evaluate_production_score, parse_refactor_output, create_refactor_zip
 
 # Initialize session state cache and persistence variables
 st.session_state.setdefault("llm_cache", {})
@@ -381,11 +381,13 @@ def _render_task_controls(task_name: str, full_task_text: str, active_code_paylo
             key="download_doc"
         )
     elif task_name == "Refactor":
+        refactor_files = parse_refactor_output(full_task_text)
+        zip_bytes = create_refactor_zip(refactor_files)
         st.download_button(
-            label="📥 Download Refactoring Suggestions",
-            data=full_task_text,
-            file_name="refactoring_suggestions.md",
-            mime="text/markdown",
+            label="📥 Download Refactoring Package (ZIP)",
+            data=zip_bytes,
+            file_name="refactored_project.zip",
+            mime="application/zip",
             use_container_width=True,
             key="download_refactor"
         )
