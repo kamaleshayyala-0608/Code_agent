@@ -213,9 +213,21 @@ def _run_llm_task(task_name: str, engine: LocalCodeAgentEngine, code: str, cache
     return task_name, result, elapsed
 
 # ---------------------------------------------------------------------------
-# Fixed Ollama model
+# Ollama Connection & Model Selection
 # ---------------------------------------------------------------------------
-available_models = LocalCodeAgentEngine.list_available_models()
+try:
+    available_models = LocalCodeAgentEngine.list_available_models()
+except Exception as e:
+    st.error("🔌 **Could not connect to local Ollama daemon**")
+    st.info(
+        "💡 **Troubleshooting Steps:**\n\n"
+        "1. **Start Ollama:** Ensure the Ollama application or daemon is running on your system.\n"
+        "2. **Check Port:** Ollama runs on `http://localhost:11434` by default.\n"
+        "3. **Refresh:** Once Ollama is started, refresh this page."
+    )
+    st.stop()
+
+MODEL_NAME = "gemma4:26b"
 if MODEL_NAME not in available_models:
     st.error(f"Required Ollama model not found: `{MODEL_NAME}`")
     st.info(

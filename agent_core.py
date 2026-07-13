@@ -71,15 +71,12 @@ Ensure all configurations match the language, framework, dependencies, and requi
 
     @staticmethod
     def list_available_models() -> list:
-        try:
-            res = ollama.list()
-            if hasattr(res, "models"):
-                return [m.model for m in res.models]
-            elif isinstance(res, dict) and "models" in res:
-                return [m.get("model", m.get("name", "")) for m in res["models"]]
-            return []
-        except Exception:
-            return []
+        res = ollama.list()
+        if hasattr(res, "models"):
+            return [m.model for m in res.models]
+        elif isinstance(res, dict) and "models" in res:
+            return [m.get("model", m.get("name", "")) for m in res["models"]]
+        return []
 
     def __init__(self, model_name: str = "gemma4:26b"):
         self.model = model_name
