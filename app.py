@@ -2,8 +2,15 @@ import time
 import hashlib
 import streamlit as st
 from agent_core import LocalCodeAgentEngine
-import concurrent.futures
-from generators.cicd_generator import parse_cicd_output, create_cicd_zip, evaluate_production_score, parse_refactor_output, create_refactor_zip
+from generators.cicd_generator import (
+    parse_cicd_output,
+    create_cicd_zip,
+    evaluate_production_score,
+    parse_json_from_llm,
+    build_refactor_markdown,
+    build_doc_markdown,
+    create_zip_from_dict
+)
 
 # Initialize session state cache and persistence variables
 st.session_state.setdefault("llm_cache", {})
@@ -39,6 +46,31 @@ def get_agent_engine(model_name: str) -> LocalCodeAgentEngine:
 def _content_hash(text: str) -> str:
     """Generate a SHA-256 hash to use as a stable cache key for code payloads."""
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+
+def _split_payload_into_files(payload: str) -> dict:
+    """
+    Parses the standard codebase payload format into a dictionary of {file_name: content}.
+    If the payload doesn't contain '--- FILE:', treats it as a single snippet named 'snippet.py'.
+    """
+    files = {}
+    if "--- FILE:" not in payload:
+        if payload.strip():
+            files["snippet.py"] = payload
+        return files
+        
+    parts = payload.split("--- FILE:")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        lines = part.split("\n", 1)
+        if len(lines) < 2:
+            continue
+        header = lines[0].strip()
+        header = header.rstrip("-").strip()
+        content = lines[1].strip()
+        files[header] = content
+    return files
 
 # ---------------------------------------------------------------------------
 # OPTIMIZATION: Split large payloads into chunks <= 12k chars so they fit
@@ -370,31 +402,62 @@ with col1:
 # ---------------------------------------------------------------------------
 # Helper to render download controls and reports for each task
 # ---------------------------------------------------------------------------
-def _render_task_controls(task_name: str, full_task_text: str, active_code_payload: str):
+def _render_task_controls(task_name: str, task_data, active_code_payload: str):
     if task_name == "Documentation":
+        # task_data is a dict of {filepath: content}
+        zip_bytes = create_zip_from_dict(task_data)
         st.download_button(
-            label="📥 Download Documentation",
-            data=full_task_text,                            
-            file_name="README.md",
-            mime="text/markdown",
+            label="📥 Download Documentation Package (ZIP)",
+            data=zip_bytes,
+            file_name="documentation.zip",
+            mime="application/zip",
             use_container_width=True,
             key="download_doc"
         )
+        
+        # Render global documents in expanders
+        for filename in ["docs/README.md", "docs/Architecture.md", "docs/API.md", "docs/FolderStructure.md"]:
+            if filename in task_data:
+                display_name = filename.replace("docs/", "")
+                with st.expander(f"📖 {display_name}", expanded=(display_name == "README.md")):
+                    st.markdown(task_data[filename])
+                    
+        # Render per-module documentation
+        with st.expander("📁 Module Specifications (Per-File docs)", expanded=False):
+            for filename, content in task_data.items():
+                if filename.startswith("docs/modules/"):
+                    module_name = filename.replace("docs/modules/", "")
+                    st.markdown(f"### `{module_name}`")
+                    st.markdown(content)
+                    st.markdown("---")
+                    
     elif task_name == "Refactor":
-        refactor_files = parse_refactor_output(full_task_text)
-        zip_bytes = create_refactor_zip(refactor_files)
+        # task_data is a dict of {filepath: content}
+        zip_bytes = create_zip_from_dict(task_data)
         st.download_button(
             label="📥 Download Refactoring Package (ZIP)",
             data=zip_bytes,
-            file_name="refactored_project.zip",
+            file_name="refactoring_suggestions.zip",
             mime="application/zip",
             use_container_width=True,
             key="download_refactor"
         )
+        
+        # Render report summary first
+        if "refactoring_report.md" in task_data:
+            with st.expander("📋 Comprehensive Refactoring Report Summary", expanded=True):
+                st.markdown(task_data["refactoring_report.md"])
+                
+        # Render per-file recommendations
+        for filename, content in task_data.items():
+            if filename != "refactoring_report.md":
+                with st.expander(f"📄 Suggestions for {filename}", expanded=False):
+                    st.markdown(content)
+                    
     elif task_name == "CI/CD":
-        cicd_files = parse_cicd_output(full_task_text)
+        cicd_files = parse_cicd_output(task_data)
         zip_bytes = create_cicd_zip(cicd_files)
-        prod_score = evaluate_production_score(cicd_files, full_task_text)
+        prod_score = evaluate_production_score(cicd_files, task_data)
         
         st.download_button(
             label="📥 Download CI/CD Package (ZIP)",
@@ -408,8 +471,8 @@ def _render_task_controls(task_name: str, full_task_text: str, active_code_paylo
         st.markdown("#### 📊 CI/CD Report")
         has_docker = any("dockerfile" in f.lower() for f in cicd_files.keys())
         has_github_actions = any("ci.yml" in f.lower() or "cd.yml" in f.lower() for f in cicd_files.keys())
-        has_secrets = "secret" in full_task_text.lower() or "secrets." in full_task_text.lower()
-        has_steps = "step" in full_task_text.lower() or "deploy" in full_task_text.lower()
+        has_secrets = "secret" in task_data.lower() or "secrets." in task_data.lower()
+        has_steps = "step" in task_data.lower() or "deploy" in task_data.lower()
         
         col_chk1, col_chk2 = st.columns(2)
         with col_chk1:
@@ -435,6 +498,16 @@ def _render_task_controls(task_name: str, full_task_text: str, active_code_paylo
         
         stack = detect_project_stack(active_code_payload)
         st.info(f"💡 **Deployment Recommendation:** Deploy using **{stack['Recommendation']}** for this {stack['Framework']} project.")
+
+    elif task_name in ("Review", "Analysis"):
+        st.download_button(
+            label=f"📥 Download {task_name} Report",
+            data=task_data,
+            file_name=f"{task_name.lower()}_report.md",
+            mime="text/markdown",
+            use_container_width=True,
+            key=f"download_{task_name.lower()}"
+        )
 
 # ---------------------------------------------------------------------------
 # REPORTING PANEL (col2)
@@ -469,27 +542,28 @@ with col2:
                 f"{original_chars:,} characters."
             )
 
+        # Standard chunks for global/monolithic tasks
         if len(active_code_payload) < CHUNK_CHAR_LIMIT:
             chunks = [active_code_payload]
         else:
             chunks = _split_into_chunks(active_code_payload, CHUNK_CHAR_LIMIT)
 
-        task_configs = []
-        if do_review:
-            task_configs.append(("Review", engine.REVIEW_PROMPT, "### 🛡️ Code Review Audit"))
-        if do_analyze:
-            task_configs.append(("Analysis", engine.ANALYSIS_PROMPT, "### 🏗️ Architecture & Complexity Analysis"))
-        if do_document:
-            task_configs.append(("Documentation", engine.DOCUMENT_PROMPT, "### 📝 Technical Documentation"))
-        if do_refactor:
-            task_configs.append(("Refactor", engine.REFACTOR_PROMPT, "### ⚙️ Refactoring Suggestions"))
-        if do_cicd:
-            task_configs.append(("CI/CD", engine.CICD_PROMPT, "### 🚀 CI/CD Pipeline"))
+        # Split into individual files for refactoring/documentation
+        files_to_process = _split_payload_into_files(active_code_payload)
 
         start_total = time.perf_counter()
         st.session_state.pipeline_results = {}
 
-        for task_name, system_prompt, header_text in task_configs:
+        # 1. Run Monolithic Tasks (Review, Analysis, CI/CD)
+        mono_configs = []
+        if do_review:
+            mono_configs.append(("Review", engine.REVIEW_PROMPT, "### 🛡️ Code Review Audit"))
+        if do_analyze:
+            mono_configs.append(("Analysis", engine.ANALYSIS_PROMPT, "### 🏗️ Architecture & Complexity Analysis"))
+        if do_cicd:
+            mono_configs.append(("CI/CD", engine.CICD_PROMPT, "### 🚀 CI/CD Pipeline"))
+
+        for task_name, system_prompt, header_text in mono_configs:
             st.markdown(header_text)
             with st.container(border=True):
                 combined_result_chunks = []
@@ -504,6 +578,146 @@ with col2:
                 full_task_text = "\n\n".join(combined_result_chunks)
                 st.session_state.pipeline_results[task_name] = full_task_text
                 _render_task_controls(task_name, full_task_text, active_code_payload)
+
+        # 2. Run Refactoring Pipeline (File-by-file)
+        if do_refactor:
+            st.markdown("### ⚙️ Refactoring Suggestions")
+            refactor_results = {}
+            st.session_state.pipeline_results["Refactor"] = refactor_results
+
+            if not files_to_process:
+                st.warning("No files found to refactor.")
+            else:
+                parsed_jsons = {}
+                if run_parallel:
+                    with st.spinner("Refactoring files in parallel..."):
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future_to_file = {}
+                            for fname, fcontent in files_to_process.items():
+                                prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
+                                future = executor.submit(engine._generate_local_response, prompt, fcontent)
+                                future_to_file[future] = fname
+                                
+                            for future in concurrent.futures.as_completed(future_to_file):
+                                fname = future_to_file[future]
+                                try:
+                                    raw_output = future.result()
+                                    parsed = parse_json_from_llm(raw_output)
+                                    parsed_jsons[fname] = parsed
+                                    refactor_results[fname] = build_refactor_markdown(parsed)
+                                except Exception as e:
+                                    refactor_results[fname] = f"Error refactoring {fname}: {str(e)}"
+                else:
+                    for fname, fcontent in files_to_process.items():
+                        st.caption(f"Refactoring `{fname}`...")
+                        prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
+                        with st.container(border=True):
+                            stream_generator = engine.generate_stream_response(prompt, fcontent)
+                            raw_output = st.write_stream(stream_generator)
+                            parsed = parse_json_from_llm(raw_output)
+                            parsed_jsons[fname] = parsed
+                            refactor_results[fname] = build_refactor_markdown(parsed)
+
+                # Generate global report table
+                report_md = ["# Comprehensive Refactoring Report Summary\n"]
+                report_md.append("| File Name | Quality Score | Cyclomatic Complexity | Maintainability Index | Priority |")
+                report_md.append("| --- | --- | --- | --- | --- |")
+                for fname in files_to_process.keys():
+                    p = parsed_jsons.get(fname, {})
+                    score = p.get("overall_score", "N/A")
+                    complexity = p.get("complexity", {})
+                    cc = complexity.get("cyclomatic_complexity", "N/A")
+                    mi = complexity.get("maintainability", "N/A")
+                    
+                    suggestions = p.get("suggestions", [])
+                    priorities = [s.get("priority", "Low") for s in suggestions]
+                    highest_priority = "Low"
+                    if "High" in priorities:
+                        highest_priority = "High"
+                    elif "Medium" in priorities:
+                        highest_priority = "Medium"
+                        
+                    report_md.append(f"| `{fname}` | **{score}/100** | {cc} | {mi} | {highest_priority} |")
+                
+                refactor_results["refactoring_report.md"] = "\n".join(report_md)
+                _render_task_controls("Refactor", refactor_results, active_code_payload)
+
+        # 3. Run Technical Documentation Pipeline (File-by-file + Global compiler)
+        if do_document:
+            st.markdown("### 📝 Technical Documentation")
+            doc_results = {}
+            st.session_state.pipeline_results["Documentation"] = doc_results
+
+            if not files_to_process:
+                st.warning("No files found to document.")
+            else:
+                parsed_jsons = {}
+                if run_parallel:
+                    with st.spinner("Documenting files in parallel..."):
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future_to_file = {}
+                            for fname, fcontent in files_to_process.items():
+                                prompt = engine.DOCUMENT_FILE_PROMPT.format(file_name=fname)
+                                future = executor.submit(engine._generate_local_response, prompt, fcontent)
+                                future_to_file[future] = fname
+                                
+                            for future in concurrent.futures.as_completed(future_to_file):
+                                fname = future_to_file[future]
+                                try:
+                                    raw_output = future.result()
+                                    parsed = parse_json_from_llm(raw_output)
+                                    parsed_jsons[fname] = parsed
+                                    doc_results[f"docs/modules/{fname}.md"] = build_doc_markdown(parsed)
+                                except Exception as e:
+                                    doc_results[f"docs/modules/{fname}.md"] = f"Error documenting {fname}: {str(e)}"
+                else:
+                    for fname, fcontent in files_to_process.items():
+                        st.caption(f"Documenting `{fname}`...")
+                        prompt = engine.DOCUMENT_FILE_PROMPT.format(file_name=fname)
+                        with st.container(border=True):
+                            stream_generator = engine.generate_stream_response(prompt, fcontent)
+                            raw_output = st.write_stream(stream_generator)
+                            parsed = parse_json_from_llm(raw_output)
+                            parsed_jsons[fname] = parsed
+                            doc_results[f"docs/modules/{fname}.md"] = build_doc_markdown(parsed)
+
+                # Compile summaries list
+                meta_summaries = []
+                for fname, parsed in parsed_jsons.items():
+                    purpose = parsed.get("purpose", "")
+                    classes_list = [c.get("name", "") for c in parsed.get("classes", [])]
+                    funcs_list = [f.get("name", "") for f in parsed.get("functions", [])]
+                    deps_list = parsed.get("dependencies", [])
+                    meta_summaries.append(
+                        f"Module: {fname}\n"
+                        f"Purpose: {purpose}\n"
+                        f"Dependencies: {', '.join(deps_list)}\n"
+                        f"Classes: {', '.join(classes_list)}\n"
+                        f"Functions: {', '.join(funcs_list)}\n"
+                        f"---"
+                    )
+                metadata_summary_text = "\n".join(meta_summaries)
+
+                # Compile overall global docs
+                st.caption("Compiling comprehensive global documentation...")
+                prompt_global = engine.GLOBAL_DOCS_PROMPT.format(metadata_summary=metadata_summary_text)
+                
+                with st.container(border=True):
+                    stream_generator = engine.generate_stream_response(prompt_global, metadata_summary_text)
+                    raw_global_output = st.write_stream(stream_generator)
+
+                global_files = parse_cicd_output(raw_global_output)
+                for path, content in global_files.items():
+                    if not path.startswith("docs/"):
+                        path = f"docs/{path}"
+                    doc_results[path] = content
+
+                if "docs/README.md" not in doc_results:
+                    doc_results["docs/README.md"] = raw_global_output
+
+                _render_task_controls("Documentation", doc_results, active_code_payload)
 
         total_elapsed = time.perf_counter() - start_total
         st.session_state.pipeline_duration = total_elapsed
@@ -534,10 +748,13 @@ with col2:
         for task_name, header_text in task_configs:
             if task_name in st.session_state.pipeline_results:
                 st.markdown(header_text)
-                full_task_text = st.session_state.pipeline_results[task_name]
+                task_data = st.session_state.pipeline_results[task_name]
                 with st.container(border=True):
-                    st.markdown(full_task_text)
-                    _render_task_controls(task_name, full_task_text, active_code_payload)
+                    # For dict data, we render via expanders in _render_task_controls
+                    # For string data, we display markdown first
+                    if isinstance(task_data, str):
+                        st.markdown(task_data)
+                    _render_task_controls(task_name, task_data, active_code_payload)
 
         st.markdown("### ⏱️ Performance Metric")
         st.metric(label="Pipeline Duration", value=f"{st.session_state.pipeline_duration:.2f} seconds")

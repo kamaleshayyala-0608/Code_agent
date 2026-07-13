@@ -1,6 +1,7 @@
 import re
 import io
 import zipfile
+import json
 
 def parse_cicd_output(text: str) -> dict:
     """
@@ -148,30 +149,206 @@ def evaluate_production_score(files: dict, text: str) -> int:
         
     return min(score, 100)
 
-def parse_refactor_output(text: str) -> dict:
+def parse_json_from_llm(text: str) -> dict:
     """
-    Parses the generated refactoring suggestions text and extracts refactored source files.
+    Robustly extracts and parses a JSON object from the LLM output text,
+    handling markdown formatting fences.
     """
-    files = {}
-    pattern = r"###\s*File:\s*([^\n\r]+)[\s\S]*?```[a-zA-Z0-9_-]*\n([\s\S]*?)```"
-    matches = re.findall(pattern, text)
-    
-    for filepath, content in matches:
-        filepath = filepath.strip()
-        filepath = re.sub(r'[*`_]', '', filepath)
-        files[filepath] = content.strip()
-        
-    # Also add/ensure the full text is saved as refactoring_report.md
-    files["refactoring_report.md"] = text
-    return files
+    cleaned = text.strip()
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, re.IGNORECASE)
+    if match:
+        cleaned = match.group(1).strip()
+    try:
+        return json.loads(cleaned)
+    except Exception as e:
+        return {
+            "error": f"Failed to parse JSON: {str(e)}",
+            "raw_text": text
+        }
 
-def create_refactor_zip(files: dict) -> bytes:
+def build_refactor_markdown(refactor_json: dict) -> str:
     """
-    Assembles a ZIP file in-memory containing the refactored code and report.
+    Synthesizes a JSON object into a readable Refactoring Suggestions markdown file.
+    """
+    if "error" in refactor_json:
+        return f"# Refactoring Report Error\n\n{refactor_json['raw_text']}"
+        
+    fn = refactor_json.get("file_name", "unknown")
+    summary = refactor_json.get("summary", "")
+    purpose = refactor_json.get("purpose", "")
+    
+    complexity = refactor_json.get("complexity", {})
+    cc = complexity.get("cyclomatic_complexity", "N/A")
+    mi = complexity.get("maintainability", "N/A")
+    
+    score = refactor_json.get("overall_score", 100)
+    
+    md = []
+    md.append(f"# Refactoring Suggestions for `{fn}`")
+    md.append(f"**Overall Quality Score:** `{score}/100`\n")
+    md.append(f"## File Overview\n- **Purpose:** {purpose}\n- **Summary:** {summary}\n")
+    md.append(f"## Complexity Metrics\n- **Cyclomatic Complexity:** {cc}\n- **Maintainability Index:** {mi}\n")
+    
+    md.append("## Code Smells")
+    smells = refactor_json.get("smells", [])
+    if smells:
+        for smell in smells:
+            stype = smell.get("type", "General")
+            sdesc = smell.get("description", "")
+            md.append(f"- **{stype}**: {sdesc}")
+    else:
+        md.append("- No significant code smells detected.")
+    md.append("")
+    
+    md.append("## Performance Problems")
+    perf = refactor_json.get("performance", [])
+    if perf:
+        for p in perf:
+            issue = p.get("issue", "")
+            desc = p.get("description", "")
+            md.append(f"- **{issue}**: {desc}")
+    else:
+        md.append("- No major performance problems identified.")
+    md.append("")
+    
+    md.append("## Security Vulnerabilities")
+    sec = refactor_json.get("security", [])
+    if sec:
+        for s in sec:
+            issue = s.get("issue", "")
+            desc = s.get("description", "")
+            md.append(f"- ⚠️ **{issue}**: {desc}")
+    else:
+        md.append("- No obvious security vulnerabilities found.")
+    md.append("")
+    
+    md.append("## SOLID Violations")
+    solid = refactor_json.get("solid_violations", [])
+    if solid:
+        for sv in solid:
+            principle = sv.get("principle", "")
+            desc = sv.get("description", "")
+            md.append(f"- **{principle}**: {desc}")
+    else:
+        md.append("- No SOLID principles violated.")
+    md.append("")
+    
+    md.append("## Refactoring Recommendations")
+    sugs = refactor_json.get("suggestions", [])
+    if sugs:
+        for sug in sugs:
+            ref = sug.get("refactoring", "")
+            priority = sug.get("priority", "Low")
+            impact = sug.get("impact", "")
+            md.append(f"- **[{priority}] {ref}**  \n  *Impact:* {impact}")
+    else:
+        md.append("- No suggestions recommended.")
+        
+    return "\n".join(md)
+
+def build_doc_markdown(doc_json: dict) -> str:
+    """
+    Synthesizes a JSON object into module documentation markdown.
+    """
+    if "error" in doc_json:
+        return f"# Module Documentation Error\n\n{doc_json['raw_text']}"
+        
+    fn = doc_json.get("file_name", "unknown")
+    purpose = doc_json.get("purpose", "")
+    
+    md = []
+    md.append(f"# Technical Documentation for `{fn}`\n")
+    md.append(f"## Module Overview\n- **Purpose:** {purpose}\n")
+    
+    md.append("## Responsibilities")
+    for resp in doc_json.get("responsibilities", []):
+        md.append(f"- {resp}")
+    md.append("")
+    
+    md.append("## Dependencies")
+    deps = doc_json.get("dependencies", [])
+    if deps:
+        for dep in deps:
+            md.append(f"- `{dep}`")
+    else:
+        md.append("- No external dependencies.")
+    md.append("")
+    
+    md.append("## Classes")
+    classes = doc_json.get("classes", [])
+    if classes:
+        for cls in classes:
+            name = cls.get("name", "")
+            purp = cls.get("purpose", "")
+            md.append(f"### Class: `{name}`\n{purp}\n")
+            methods = cls.get("methods", [])
+            if methods:
+                md.append("#### Methods")
+                for m in methods:
+                    mname = m.get("name", "")
+                    mpurp = m.get("purpose", "")
+                    margs = ", ".join(m.get("arguments", []))
+                    mret = m.get("returns", "void")
+                    md.append(f"- **`{mname}({margs})`**: {mpurp} (Returns: `{mret}`)")
+            md.append("")
+    else:
+        md.append("- No classes defined.")
+    md.append("")
+    
+    md.append("## Functions")
+    funcs = doc_json.get("functions", [])
+    if funcs:
+        for f in funcs:
+            fname = f.get("name", "")
+            fpurp = f.get("purpose", "")
+            fargs = ", ".join(f.get("arguments", []))
+            fret = f.get("returns", "void")
+            md.append(f"- **`{fname}({fargs})`**: {fpurp} (Returns: `{fret}`)")
+    else:
+        md.append("- No standalone functions defined.")
+    md.append("")
+    
+    md.append(f"## Execution Call Flow\n{doc_json.get('flow', 'N/A')}\n")
+    
+    md.append("## Inputs & Outputs")
+    md.append("### Inputs")
+    for inp in doc_json.get("inputs", []):
+        md.append(f"- {inp}")
+    if not doc_json.get("inputs", []):
+        md.append("- None")
+    md.append("### Outputs")
+    for outp in doc_json.get("outputs", []):
+        md.append(f"- {outp}")
+    if not doc_json.get("outputs", []):
+        md.append("- None")
+    md.append("")
+    
+    md.append("## Exception Handling")
+    excs = doc_json.get("exceptions", [])
+    if excs:
+        for exc in excs:
+            etype = exc.get("type", "")
+            desc = exc.get("description", "")
+            md.append(f"- **`{etype}`**: {desc}")
+    else:
+        md.append("- No formal exceptions cataloged.")
+    md.append("")
+    
+    md.append("## Future Improvements")
+    for imp in doc_json.get("future_improvements", []):
+        md.append(f"- {imp}")
+    if not doc_json.get("future_improvements", []):
+        md.append("- None planned.")
+        
+    return "\n".join(md)
+
+def create_zip_from_dict(files_dict: dict) -> bytes:
+    """
+    Generates a ZIP archive from a dictionary of {file_path: file_content}.
     """
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for filepath, content in files.items():
+        for filepath, content in files_dict.items():
             clean_path = filepath.replace("\\", "/")
             zip_file.writestr(clean_path, content)
     zip_buffer.seek(0)

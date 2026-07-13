@@ -42,9 +42,61 @@ Explain:
 - Scalability
 Return a professional report."""
 
-    DOCUMENT_PROMPT = """Generate one professional README.
-Include:
-Overview | Project Structure | Installation | Requirements | Usage | Architecture | Folder Structure | API | Classes | Functions | Configuration | Future Improvements"""
+    DOCUMENT_FILE_PROMPT = """You are a Technical Writer and Software Engineer.
+Generate detailed technical documentation for ONLY the provided file. Do NOT analyze the entire project.
+
+File Name:
+{file_name}
+
+You MUST return your documentation strictly as a JSON object matching the schema below. Do not wrap the JSON output in markdown formatting except standard json fenced code blocks, and output no additional conversational text.
+
+JSON Schema:
+{{
+  "file_name": "string",
+  "purpose": "string",
+  "responsibilities": ["string"],
+  "dependencies": ["string"],
+  "classes": [
+    {{
+      "name": "string",
+      "purpose": "string",
+      "methods": [
+        {{"name": "string", "purpose": "string", "arguments": ["string"], "returns": "string"}}
+      ]
+    }}
+  ],
+  "functions": [
+    {{"name": "string", "purpose": "string", "arguments": ["string"], "returns": "string"}}
+  ],
+  "flow": "string describing execution call flow",
+  "inputs": ["string"],
+  "outputs": ["string"],
+  "exceptions": [
+    {{"type": "string", "description": "string"}}
+  ],
+  "future_improvements": ["string"]
+}}"""
+
+    GLOBAL_DOCS_PROMPT = """You are a Technical Writer and Software Architect.
+Analyze the provided summaries of all modules in the project and generate the comprehensive project-wide documentation.
+
+You MUST format your output as a collection of separate file blocks.
+For each file you generate, start with a header exactly in the format:
+### File: docs/<filename>
+followed by the markdown content.
+
+You MUST generate the following files:
+1. ### File: docs/README.md
+Include project overview, quick start, installation, configurations, and a guide of how to use it.
+2. ### File: docs/Architecture.md
+Include architecture components, modular flow diagram description, and dependencies.
+3. ### File: docs/API.md
+Include key module APIs, classes, and exported/public function definitions.
+4. ### File: docs/FolderStructure.md
+Include an ASCII folder tree and descriptions of what each directory and file does.
+
+Ensure the files are highly detailed and match the metadata of the files:
+{metadata_summary}"""
 
     CICD_PROMPT = """You are a Senior DevOps Engineer.
 Analyze the uploaded/scanned codebase.
@@ -67,21 +119,41 @@ Generate a GitHub Actions workflow for Continuous Deployment (CD) that builds th
 Generate a README file describing the deployment architecture, required repository secrets (e.g., credentials, tokens), local run instructions, and production recommendations.
 
 Ensure all configurations match the language, framework, dependencies, and requirements found in the analyzed code."""
- 
- 
-    REFACTOR_PROMPT = """You are an expert Software Engineer specializing in code quality, refactoring, and clean code.
-Analyze the provided codebase and suggest refactoring improvements.
 
-You MUST format your response as a collection of separate file blocks.
-1. The first block must contain a comprehensive report describing all code smells, DRY violations, SOLID violations, and the refactoring strategy for the files. Use this header exactly:
-### File: refactoring_report.md
-followed by your report.
+    REFACTOR_FILE_PROMPT = """You are a Principal Software Engineer.
+Analyze ONLY the provided file. Do NOT analyze the entire project.
 
-2. For each source file you refactor, output a block starting exactly with this header:
-### File: <relative_filepath>
-followed by a fenced code block containing the fully refactored, production-ready code.
+File Name:
+{file_name}
 
-Ensure all refactored implementations compile, retain original logic behavior, and improve clean code metrics."""
+You MUST return your analysis strictly as a JSON object matching the schema below. Do not wrap the JSON output in markdown formatting except standard json fenced code blocks, and output no additional conversational text.
+
+JSON Schema:
+{{
+  "file_name": "string",
+  "summary": "string describing what this file does",
+  "purpose": "string describing the purpose of the file",
+  "complexity": {{
+    "cyclomatic_complexity": "string",
+    "maintainability": "string"
+  }},
+  "smells": [
+    {{"type": "string", "description": "string"}}
+  ],
+  "performance": [
+    {{"issue": "string", "description": "string"}}
+  ],
+  "security": [
+    {{"issue": "string", "description": "string"}}
+  ],
+  "solid_violations": [
+    {{"principle": "string", "description": "string"}}
+  ],
+  "suggestions": [
+    {{"refactoring": "string", "priority": "High/Medium/Low", "impact": "string"}}
+  ],
+  "overall_score": 85
+}}"""
 
 
     @staticmethod
@@ -154,14 +226,20 @@ Ensure all refactored implementations compile, retain original logic behavior, a
     def analyze_code(self, code: str) -> str:
         return self._generate_local_response(self.ANALYSIS_PROMPT, code)
 
-    def document_code(self, code: str) -> str:
-        return self._generate_local_response(self.DOCUMENT_PROMPT, code)
+    def document_file(self, file_name: str, file_content: str) -> str:
+        prompt = self.DOCUMENT_FILE_PROMPT.format(file_name=file_name)
+        return self._generate_local_response(prompt, file_content)
+
+    def generate_global_docs(self, metadata_summary: str) -> str:
+        prompt = self.GLOBAL_DOCS_PROMPT.format(metadata_summary=metadata_summary)
+        return self._generate_local_response(prompt, metadata_summary)
 
     def generate_cicd(self, code: str) -> str:
         return self._generate_local_response(self.CICD_PROMPT, code)
 
-    def refactor_code(self, code: str) -> str:
-        return self._generate_local_response(self.REFACTOR_PROMPT, code)
+    def refactor_file(self, file_name: str, file_content: str) -> str:
+        prompt = self.REFACTOR_FILE_PROMPT.format(file_name=file_name)
+        return self._generate_local_response(prompt, file_content)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:
