@@ -67,6 +67,15 @@ Generate a GitHub Actions workflow for Continuous Deployment (CD) that builds th
 Generate a README file describing the deployment architecture, required repository secrets (e.g., credentials, tokens), local run instructions, and production recommendations.
 
 Ensure all configurations match the language, framework, dependencies, and requirements found in the analyzed code."""
+ 
+ 
+    REFACTOR_PROMPT = """You are an expert Software Engineer specializing in code quality, refactoring, and clean code.
+Analyze the provided code and suggest refactoring improvements.
+For the refactoring suggestions, provide:
+- **Code Quality Issues**: Identify bad smells, DRY violations, or styling issues.
+- **Refactoring Strategy**: Explain the concrete steps to refactor.
+- **Clean/Refactored Implementation**: Provide the refactored code block with descriptions of changes made.
+Return the suggestions in structured Markdown."""
 
 
     @staticmethod
@@ -144,6 +153,9 @@ Ensure all configurations match the language, framework, dependencies, and requi
 
     def generate_cicd(self, code: str) -> str:
         return self._generate_local_response(self.CICD_PROMPT, code)
+
+    def refactor_code(self, code: str) -> str:
+        return self._generate_local_response(self.REFACTOR_PROMPT, code)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:
