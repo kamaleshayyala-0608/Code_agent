@@ -55,6 +55,7 @@ JSON Schema:
   "file_name": "string",
   "purpose": "string",
   "responsibilities": ["string"],
+  "imports": ["string"],
   "dependencies": ["string"],
   "classes": [
     {{
@@ -74,6 +75,8 @@ JSON Schema:
   "exceptions": [
     {{"type": "string", "description": "string"}}
   ],
+  "configuration": ["string detailing configuration parameters/settings/secrets if any"],
+  "example_usage": "string with snippet or guide",
   "future_improvements": ["string"]
 }}"""
 
@@ -89,13 +92,13 @@ You MUST generate the following files:
 1. ### File: docs/README.md
 Include project overview, quick start, installation, configurations, and a guide of how to use it.
 2. ### File: docs/Architecture.md
-Include architecture components, modular flow diagram description, and dependencies.
+Include architecture components, modular flow diagram description, dependencies, module relationships, and the project entry point.
 3. ### File: docs/API.md
-Include key module APIs, classes, and exported/public function definitions.
+Include key module APIs, classes, and exported/public function definitions, and external libraries.
 4. ### File: docs/FolderStructure.md
 Include an ASCII folder tree and descriptions of what each directory and file does.
 
-Ensure the files are highly detailed and match the metadata of the files:
+Ensure the files are highly detailed, cover project-wide configurations, module relationships, entry point, external libraries, and execution flows, and match the metadata of the files:
 {metadata_summary}"""
 
     CICD_PROMPT = """You are a Senior DevOps Engineer.
@@ -152,6 +155,7 @@ JSON Schema:
   "suggestions": [
     {{"refactoring": "string", "priority": "High/Medium/Low", "impact": "string"}}
   ],
+  "estimated_refactoring_time": "string with estimate (e.g. 2 hours)",
   "overall_score": 85
 }}"""
 

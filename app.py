@@ -81,7 +81,7 @@ CHUNK_CHAR_LIMIT = 12000
 DEFAULT_FAST_CHAR_LIMIT = 30000
 MODEL_NAME = "gemma4:26b"
 FAST_MODE = True
-RUN_PARALLEL = False
+RUN_PARALLEL = True
 
 def _split_into_chunks(text: str, chunk_size: int = CHUNK_CHAR_LIMIT) -> list:
     """
@@ -217,39 +217,6 @@ def detect_project_stack(payload: str) -> dict:
         detected["Deployment"] = "Cloud"
 
     return detected
-
-# ---------------------------------------------------------------------------
-# OPTIMIZATION: Helper to run a single LLM task in a background thread.
-# Uses the session-state cache so repeated analyses return instantly.
-# ---------------------------------------------------------------------------
-def _run_llm_task(task_name: str, engine: LocalCodeAgentEngine, code: str, cache_key: tuple, cache: dict):
-    """
-    Execute review / analyze / document on a code chunk.
-    Returns (task_name, result_str, elapsed_time_seconds).
-    Cache hit returns instantly with 0.0 elapsed time.
-    """
-    if cache_key in cache:
-        return task_name, cache[cache_key], 0.0
-
-    start = time.perf_counter()
-    try:
-        if task_name == "Review":
-            result = engine.review_code(code)
-        elif task_name == "Analysis":
-            result = engine.analyze_code(code)
-        elif task_name == "Documentation":
-            result = engine.document_code(code)
-        elif task_name == "Refactor":
-            result = engine.refactor_code(code)
-        else:
-            raise ValueError(f"Unknown task: {task_name}")
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        return task_name, f"ERROR: {str(e)}", elapsed
-
-    elapsed = time.perf_counter() - start
-    cache[cache_key] = result
-    return task_name, result, elapsed
 
 # ---------------------------------------------------------------------------
 # Ollama Connection & Model Selection
@@ -604,25 +571,34 @@ with col2:
                                 try:
                                     raw_output = future.result()
                                     parsed = parse_json_from_llm(raw_output)
+                                    if "error" in parsed:
+                                        st.error(f"JSON schema error for {fname}: {parsed['error']}")
                                     parsed_jsons[fname] = parsed
                                     refactor_results[fname] = build_refactor_markdown(parsed)
                                 except Exception as e:
+                                    st.error(f"Failed to parse JSON for {fname}: {e}")
                                     refactor_results[fname] = f"Error refactoring {fname}: {str(e)}"
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Refactoring `{fname}`...")
                         prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
                         with st.container(border=True):
-                            stream_generator = engine.generate_stream_response(prompt, fcontent)
-                            raw_output = st.write_stream(stream_generator)
-                            parsed = parse_json_from_llm(raw_output)
+                            raw_output = engine._generate_local_response(prompt, fcontent)
+                            st.write("✓ Analysis completed.")
+                            try:
+                                parsed = parse_json_from_llm(raw_output)
+                                if "error" in parsed:
+                                    st.error(f"JSON schema error for {fname}: {parsed['error']}")
+                            except Exception as e:
+                                st.error(f"Failed to parse JSON for {fname}: {e}")
+                                continue
                             parsed_jsons[fname] = parsed
                             refactor_results[fname] = build_refactor_markdown(parsed)
 
                 # Generate global report table
                 report_md = ["# Comprehensive Refactoring Report Summary\n"]
-                report_md.append("| File Name | Quality Score | Cyclomatic Complexity | Maintainability Index | Priority |")
-                report_md.append("| --- | --- | --- | --- | --- |")
+                report_md.append("| File Name | Quality Score | Complexity | Maintainability | Security Issues | Performance Issues | SOLID Violations | Code Smells | Est. Time | Priority |")
+                report_md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
                 for fname in files_to_process.keys():
                     p = parsed_jsons.get(fname, {})
                     score = p.get("overall_score", "N/A")
@@ -630,15 +606,21 @@ with col2:
                     cc = complexity.get("cyclomatic_complexity", "N/A")
                     mi = complexity.get("maintainability", "N/A")
                     
+                    sec_count = len(p.get("security", [])) if isinstance(p.get("security"), list) else 0
+                    perf_count = len(p.get("performance", [])) if isinstance(p.get("performance"), list) else 0
+                    solid_count = len(p.get("solid_violations", [])) if isinstance(p.get("solid_violations"), list) else 0
+                    smells_count = len(p.get("smells", [])) if isinstance(p.get("smells"), list) else 0
+                    est_time = p.get("estimated_refactoring_time", "N/A")
+                    
                     suggestions = p.get("suggestions", [])
-                    priorities = [s.get("priority", "Low") for s in suggestions]
+                    priorities = [s.get("priority", "Low") for s in suggestions] if isinstance(suggestions, list) else []
                     highest_priority = "Low"
                     if "High" in priorities:
                         highest_priority = "High"
                     elif "Medium" in priorities:
                         highest_priority = "Medium"
                         
-                    report_md.append(f"| `{fname}` | **{score}/100** | {cc} | {mi} | {highest_priority} |")
+                    report_md.append(f"| `{fname}` | **{score}/100** | {cc} | {mi} | {sec_count} | {perf_count} | {solid_count} | {smells_count} | {est_time} | {highest_priority} |")
                 
                 refactor_results["refactoring_report.md"] = "\n".join(report_md)
                 _render_task_controls("Refactor", refactor_results, active_code_payload)
@@ -668,18 +650,27 @@ with col2:
                                 try:
                                     raw_output = future.result()
                                     parsed = parse_json_from_llm(raw_output)
+                                    if "error" in parsed:
+                                        st.error(f"JSON schema error for {fname}: {parsed['error']}")
                                     parsed_jsons[fname] = parsed
                                     doc_results[f"docs/modules/{fname}.md"] = build_doc_markdown(parsed)
                                 except Exception as e:
+                                    st.error(f"Failed to parse JSON for {fname}: {e}")
                                     doc_results[f"docs/modules/{fname}.md"] = f"Error documenting {fname}: {str(e)}"
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Documenting `{fname}`...")
                         prompt = engine.DOCUMENT_FILE_PROMPT.format(file_name=fname)
                         with st.container(border=True):
-                            stream_generator = engine.generate_stream_response(prompt, fcontent)
-                            raw_output = st.write_stream(stream_generator)
-                            parsed = parse_json_from_llm(raw_output)
+                            raw_output = engine._generate_local_response(prompt, fcontent)
+                            st.write("✓ Analysis completed.")
+                            try:
+                                parsed = parse_json_from_llm(raw_output)
+                                if "error" in parsed:
+                                    st.error(f"JSON schema error for {fname}: {parsed['error']}")
+                            except Exception as e:
+                                st.error(f"Failed to parse JSON for {fname}: {e}")
+                                continue
                             parsed_jsons[fname] = parsed
                             doc_results[f"docs/modules/{fname}.md"] = build_doc_markdown(parsed)
 
@@ -687,15 +678,22 @@ with col2:
                 meta_summaries = []
                 for fname, parsed in parsed_jsons.items():
                     purpose = parsed.get("purpose", "")
-                    classes_list = [c.get("name", "") for c in parsed.get("classes", [])]
-                    funcs_list = [f.get("name", "") for f in parsed.get("functions", [])]
-                    deps_list = parsed.get("dependencies", [])
+                    classes_list = [c.get("name", "") for c in parsed.get("classes", [])] if isinstance(parsed.get("classes"), list) else []
+                    funcs_list = [f.get("name", "") for f in parsed.get("functions", [])] if isinstance(parsed.get("functions"), list) else []
+                    deps_list = parsed.get("dependencies", []) if isinstance(parsed.get("dependencies"), list) else []
+                    imports_list = parsed.get("imports", []) if isinstance(parsed.get("imports"), list) else []
+                    config_list = parsed.get("configuration", []) if isinstance(parsed.get("configuration"), list) else []
+                    flow = parsed.get("flow", "")
+                    
                     meta_summaries.append(
                         f"Module: {fname}\n"
                         f"Purpose: {purpose}\n"
+                        f"Imports: {', '.join(imports_list)}\n"
                         f"Dependencies: {', '.join(deps_list)}\n"
                         f"Classes: {', '.join(classes_list)}\n"
                         f"Functions: {', '.join(funcs_list)}\n"
+                        f"Execution Flow: {flow}\n"
+                        f"Configurations: {', '.join(config_list)}\n"
                         f"---"
                     )
                 metadata_summary_text = "\n".join(meta_summaries)

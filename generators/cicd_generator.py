@@ -182,10 +182,12 @@ def build_refactor_markdown(refactor_json: dict) -> str:
     mi = complexity.get("maintainability", "N/A")
     
     score = refactor_json.get("overall_score", 100)
+    est_time = refactor_json.get("estimated_refactoring_time", "N/A")
     
     md = []
     md.append(f"# Refactoring Suggestions for `{fn}`")
-    md.append(f"**Overall Quality Score:** `{score}/100`\n")
+    md.append(f"**Overall Quality Score:** `{score}/100`  ")
+    md.append(f"**Estimated Refactoring Time:** `{est_time}`\n")
     md.append(f"## File Overview\n- **Purpose:** {purpose}\n- **Summary:** {summary}\n")
     md.append(f"## Complexity Metrics\n- **Cyclomatic Complexity:** {cc}\n- **Maintainability Index:** {mi}\n")
     
@@ -265,6 +267,15 @@ def build_doc_markdown(doc_json: dict) -> str:
         md.append(f"- {resp}")
     md.append("")
     
+    md.append("## Imports")
+    imports = doc_json.get("imports", [])
+    if imports:
+        for imp in imports:
+            md.append(f"- `{imp}`")
+    else:
+        md.append("- No library imports.")
+    md.append("")
+
     md.append("## Dependencies")
     deps = doc_json.get("dependencies", [])
     if deps:
@@ -334,6 +345,23 @@ def build_doc_markdown(doc_json: dict) -> str:
         md.append("- No formal exceptions cataloged.")
     md.append("")
     
+    md.append("## Configuration Settings")
+    configs = doc_json.get("configuration", [])
+    if configs:
+        for cfg in configs:
+            md.append(f"- {cfg}")
+    else:
+        md.append("- No custom configuration settings mapped.")
+    md.append("")
+
+    md.append("## Example Usage")
+    usage = doc_json.get("example_usage", "")
+    if usage:
+        md.append(usage)
+    else:
+        md.append("- No example usage provided.")
+    md.append("")
+
     md.append("## Future Improvements")
     for imp in doc_json.get("future_improvements", []):
         md.append(f"- {imp}")
