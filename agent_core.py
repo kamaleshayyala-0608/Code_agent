@@ -114,7 +114,7 @@ Use Markdown prose directly after each file header; do not use code fences. Incl
 
     GLOBAL_REFACTOR_PROMPT = """You are a Principal Software Architect.
 
-You have received refactoring findings from multiple files.
+You have received refactoring findings from multiple files. Analyze them to produce a project-level refactoring package.
 
 Generate:
 
@@ -128,21 +128,27 @@ COMMON_PATTERNS.md
 
 MIGRATION_PLAN.md
 
-QUICK_WINS.md
-
 REFACTORING_SPEC.md
 
-Summarize repeated engineering patterns.
+Detailed requirements for generated files:
 
-Identify reusable hooks.
+1. COMMON_FUNCTIONS.md:
+Identify duplicate helper functions, shared API logic, shared validation, shared formatting, shared table configuration, and shared calculations. Recommend extraction locations (e.g. hooks/usePCRAnalysis.ts, utils/formatters.ts).
 
-Identify duplicate functions.
+2. CUSTOM_HOOKS.md:
+Identify custom hooks that should be created (e.g. usePCRAnalysis(), useGridColumns(), useAnalysisHistory()) and explain why.
 
-Identify repeated API calls.
-
-Identify reusable utilities.
-
-Generate a project-wide refactoring specification.
+3. REFACTORING_SPEC.md:
+Generate reusable engineering rules covering:
+- React conventions
+- Hook conventions
+- State management rules
+- Performance rules
+- Folder structure rules
+- Naming conventions
+- Component structure
+- API patterns
+- Transformation rules
 
 You MUST format the output as separate Markdown file blocks. Every block starts exactly with:
 ### File: <filename>
@@ -193,16 +199,18 @@ Focus on:
 - Functions that should be extracted
 - Reusable custom hooks
 - Common helper methods
-- Duplicate validation logic
-- Duplicate table/grid configuration
-- Expensive rendering
-- Unnecessary re-renders
-- Dead code
-- Unused imports
-- Unused state
-- React anti-patterns
+Analyze ONLY the provided file. Your goal is to identify concrete refactoring opportunities that improve maintainability, readability, and performance while preserving behaviour.
 
-Return your response in Markdown only.
+Perform a layer-by-layer engineering analysis focusing on:
+- Layer 1 – Component Structure (multiple responsibilities, split candidates, large render, large files, repeated JSX)
+- Layer 2 – React Hooks (duplicate useEffect, incorrect dependency arrays, stale closures, missing cleanup, missing useMemo/useCallback, derived state in useState, unnecessary updates, infinite render risks)
+- Layer 3 – API Layer (duplicate/sequential requests, missing caching, repeated fetch logic, loading optimization, error handling)
+- Layer 4 – Functions (duplicate helpers, redundant/dead functions, extraction candidates, shared routines, repeated business logic)
+- Layer 5 – Rendering Performance (unnecessary re-renders, expensive calculations, inline objects/callbacks, missing React.memo, prop chains)
+- Layer 6 – Business Logic (duplicate validation, transformations, sorting, filtering, repeated calculations)
+- Layer 7 – Code Reuse (opportunities to extract custom hooks, utility functions, shared components, API services, constants, config modules)
+
+Return your response in Markdown only using the exact structure below.
 
 Format:
 
@@ -212,33 +220,60 @@ Format:
 ### Finding 1
 
 Category
+[Category Name]
 
 Problem
+[Problem Description]
 
 Evidence
+[Code Evidence]
 
 Recommendation
+[Recommendation Detail]
 
 Expected Benefit
+[Expected Benefit]
 
 Estimated Effort
+[Estimated Effort]
 
 --------------------------------
 
-Repeat for every finding."""
+Repeat the findings block above for every finding.
+
+--------------------------------
+
+### Common Functions / Routines
+List reusable functions.
+Recommend extraction into:
+hooks/
+utils/
+services/
+
+--------------------------------
+
+### Performance Improvements
+List React-specific improvements.
+
+--------------------------------
+
+### Refactoring Priority
+[Critical/High/Medium/Low]"""
 
     REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect.
 Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings.
 
 Your response should contain:
 # REFACTORING_SPEC.md
-- Engineering principles
-- Transformation rules
+- React conventions
+- Hook conventions
+- State management rules
+- Performance rules
+- Folder structure rules
 - Naming conventions
-- Hook usage rules
-- Component structure rules
-- Folder structure recommendations
-- Common reusable patterns
+- Component structure
+- API patterns
+- Transformation rules
 
 You MUST start your response exactly with the header:
 ### File: REFACTORING_SPEC.md
