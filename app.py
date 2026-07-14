@@ -1,10 +1,12 @@
 import time
 import hashlib
+import json
 import concurrent.futures
 import streamlit as st
 from agent_core import LocalCodeAgentEngine, REQUIRED_MODEL_NAME
 from generators.cicd_generator import (
     parse_cicd_output,
+    parse_markdown_file_blocks,
     create_cicd_zip,
     evaluate_production_score,
     parse_json_from_llm,
@@ -73,6 +75,40 @@ def _split_payload_into_files(payload: str) -> dict:
         files[header] = content
     return files
 
+def _extract_folder_structure(payload: str) -> str:
+    """
+    Extracts a folder tree representation from the codebase payload.
+    Returns an ASCII tree of the current folder structure.
+    """
+    files = _split_payload_into_files(payload)
+    if not files:
+        return "No files detected."
+    
+    tree = {}
+    for fname in files.keys():
+        parts = fname.replace("\\", "/").split("/")
+        current = tree
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = None
+    
+    lines = ["."]
+    def build_tree(node, prefix, is_last_list):
+        entries = sorted(node.keys())
+        for i, name in enumerate(entries):
+            is_last = (i == len(entries) - 1)
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{name}")
+            child = node[name]
+            if child is not None:
+                extension = "    " if is_last else "│   "
+                build_tree(child, prefix + extension, [])
+    
+    build_tree(tree, "", [])
+    return "\n".join(lines)
+
 # ---------------------------------------------------------------------------
 # OPTIMIZATION: Split large payloads into chunks <= 8k chars for faster processing
 # Small projects (< 8k chars) are not split.
@@ -85,6 +121,7 @@ FAST_MODE = True
 # many 26B requests at once increases queueing and VRAM pressure instead of
 # reducing total report time.
 MAX_CONCURRENT_MODEL_REQUESTS = 1
+GLOBAL_COMPILER_TOKENS = 1200
 
 def _split_into_chunks(text: str, chunk_size: int = CHUNK_CHAR_LIMIT) -> list:
     """
@@ -406,14 +443,19 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                 key="download_refactor"
             )
         
+        # Render project-level guide first
+        if "REFACTORING_GUIDE.md" in task_data:
+            with st.expander("📋 Project Refactoring Guide", expanded=True):
+                st.markdown(task_data["REFACTORING_GUIDE.md"])
+
         # Render report summary first
         if "refactoring_report.md" in task_data:
             with st.expander("📋 Comprehensive Refactoring Report Summary", expanded=True):
                 st.markdown(task_data["refactoring_report.md"])
                 
-        # Render per-file recommendations
+        # Render per-file recommendations separately from consulting documents.
         for filename, content in task_data.items():
-            if filename != "refactoring_report.md":
+            if filename.startswith("FILE_RECOMMENDATIONS/"):
                 with st.expander(f"📄 Suggestions for {filename}", expanded=False):
                     st.markdown(content)
                     
@@ -577,10 +619,10 @@ with col2:
                                     if "error" in parsed:
                                         st.error(f"JSON schema error for {fname}: {parsed['error']}")
                                     parsed_jsons[fname] = parsed
-                                    refactor_results[fname] = build_refactor_markdown(parsed)
+                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = build_refactor_markdown(parsed)
                                 except Exception as e:
                                     st.error(f"Failed to parse JSON for {fname}: {e}")
-                                    refactor_results[fname] = f"Error refactoring {fname}: {str(e)}"
+                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Refactoring `{fname}`...")
@@ -596,7 +638,7 @@ with col2:
                                 st.error(f"Failed to parse JSON for {fname}: {e}")
                                 continue
                             parsed_jsons[fname] = parsed
-                            refactor_results[fname] = build_refactor_markdown(parsed)
+                            refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = build_refactor_markdown(parsed)
 
                 # Generate global report table
                 report_md = ["# Comprehensive Refactoring Report Summary\n"]
@@ -626,6 +668,25 @@ with col2:
                     report_md.append(f"| `{fname}` | **{score}/100** | {cc} | {mi} | {sec_count} | {perf_count} | {solid_count} | {smells_count} | {est_time} | {highest_priority} |")
                 
                 refactor_results["refactoring_report.md"] = "\n".join(report_md)
+
+                # Compile the file-level findings into a project consulting package.
+                refactor_metadata = "\n\n".join(
+                    f"### Analysis for {fname}\n```json\n{json.dumps(parsed, indent=2)}\n```"
+                    for fname, parsed in parsed_jsons.items()
+                )
+                st.caption("Compiling project-level refactoring guide...")
+                with st.container(border=True):
+                    try:
+                        compiler_prompt = engine.GLOBAL_REFACTOR_PROMPT.format(metadata_summary=refactor_metadata)
+                        compiler_stream = engine.generate_stream_response(
+                            compiler_prompt,
+                            "Generate the requested refactoring package from the analyses in your instructions.",
+                            num_predict=GLOBAL_COMPILER_TOKENS,
+                        )
+                        raw_refactor_compilation = st.write_stream(compiler_stream) or ""
+                        refactor_results.update(parse_markdown_file_blocks(raw_refactor_compilation))
+                    except Exception as e:
+                        st.error(f"Error during refactoring compilation: {str(e)}")
                 _render_task_controls("Refactor", refactor_results, active_code_payload)
 
         # 3. Run Technical Documentation Pipeline (File-by-file + Global compiler)
@@ -678,6 +739,7 @@ with col2:
                             doc_results[f"docs/modules/{fname}.md"] = build_doc_markdown(parsed)
 
                 # Compile summaries list
+                folder_structure = _extract_folder_structure(active_code_payload)
                 meta_summaries = []
                 for fname, parsed in parsed_jsons.items():
                     purpose = parsed.get("purpose", "")
@@ -699,6 +761,7 @@ with col2:
                         f"Configurations: {', '.join(config_list)}\n"
                         f"---"
                     )
+                meta_summaries.append(f"Current Folder Structure:\n{folder_structure}")
                 metadata_summary_text = "\n".join(meta_summaries)
 
                 # Compile overall global docs
@@ -715,7 +778,7 @@ with col2:
                         st.error(f"Error during documentation compilation: {str(e)}")
                         raw_global_output = ""
 
-                global_files = parse_cicd_output(raw_global_output)
+                global_files = parse_markdown_file_blocks(raw_global_output)
                 for path, content in global_files.items():
                     if not path.startswith("docs/"):
                         path = f"docs/{path}"

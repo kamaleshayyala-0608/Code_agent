@@ -83,24 +83,62 @@ JSON Schema:
 }}"""
 
     GLOBAL_DOCS_PROMPT = """You are a Technical Writer and Software Architect.
-Analyze the provided summaries of all modules in the project and generate the comprehensive project-wide documentation.
+Analyze the provided summaries of all modules in the project and generate a consulting-quality documentation package.
 
 You MUST format your output as a collection of separate file blocks.
 For each file you generate, start with a header exactly in the format:
-### File: docs/<filename>
+### File: <filename>
 followed by the markdown content.
 
 You MUST generate the following files:
-1. ### File: docs/README.md
-Include project overview, quick start, installation, configurations, and a guide of how to use it.
-2. ### File: docs/Architecture.md
-Include architecture components, modular flow diagram description, dependencies, module relationships, and the project entry point.
-3. ### File: docs/API.md
-Include key module APIs, classes, and exported/public function definitions, and external libraries.
-4. ### File: docs/FolderStructure.md
-Include an ASCII folder tree and descriptions of what each directory and file does.
+1. README.md
+2. Architecture.md
+3. ExecutionFlow.md
+4. DependencyGraph.md
+5. Configuration.md
+6. API.md
+7. FolderStructure.md (include a Current vs Recommended folder tree comparison)
+8. DeploymentGuide.md
+9. Troubleshooting.md
+10. Glossary.md
+11. UserGuide.md
+12. DeveloperGuide.md
 
-Ensure the files are highly detailed, cover project-wide configurations, module relationships, entry point, external libraries, and execution flows, and match the metadata of the files:
+For FolderStructure.md, explicitly present:
+- Current folder structure (derived from the metadata)
+- Recommended folder structure (propose a clean, standard layout)
+- Rationale for each change
+
+Use Markdown prose directly after each file header; do not use code fences. Include an ASCII folder tree, dependency and execution-flow descriptions where relevant. Only state facts supported by the supplied metadata:
+{metadata_summary}"""
+
+    GLOBAL_REFACTOR_PROMPT = """You are a Principal Software Architect.
+Below are per-file refactoring analyses for a project. Produce a consulting-quality, project-level refactoring package.
+
+Do NOT organize the main findings by file. Group related findings by engineering concern, identify all affected files, merge duplicate suggestions, and prioritize risks.
+
+You MUST format the output as separate Markdown file blocks. Every block starts exactly with:
+### File: <filename>
+then its Markdown content, with no code fences.
+
+Generate these files:
+1. REFACTORING_GUIDE.md (executive overview and project health score)
+2. EXECUTIVE_SUMMARY.md
+3. PRIORITY_MATRIX.md (Priority, issue, affected files, impact, effort, recommendation)
+4. QUICK_WINS.md
+5. BEFORE_AFTER.md (illustrative before/after examples and benefits)
+6. MIGRATION_PLAN.md (phased roadmap: security, architecture, performance, cleanup)
+7. DESIGN_SMELLS.md
+8. SOLID_VIOLATIONS.md
+9. PERFORMANCE.md
+10. SECURITY.md
+11. ARCHITECT_REMARKS.md
+
+Also generate a per-file recommendations directory named FILE_RECOMMENDATIONS/ containing one markdown file per source file (e.g. FILE_RECOMMENDATIONS/app.md, FILE_RECOMMENDATIONS/agent_core.md).
+
+Be explicit about uncertainty. Use the supplied before_code, after_code, benefits, and estimated_effort when present. Do not invent vulnerabilities or code that are not supported by the analyses.
+
+Per-file analyses:
 {metadata_summary}"""
 
     CICD_PROMPT = """You are a Senior DevOps Engineer.
@@ -155,7 +193,15 @@ JSON Schema:
     {{"principle": "string", "description": "string"}}
   ],
   "suggestions": [
-    {{"refactoring": "string", "priority": "High/Medium/Low", "impact": "string"}}
+    {{
+      "refactoring": "string",
+      "priority": "Critical/High/Medium/Low",
+      "impact": "string",
+      "before_code": "short illustrative existing code or empty string",
+      "after_code": "short illustrative improved code or empty string",
+      "benefits": ["string"],
+      "estimated_effort": "string"
+    }}
   ],
   "estimated_refactoring_time": "string with estimate (e.g. 2 hours)",
   "overall_score": 85
@@ -187,11 +233,12 @@ JSON Schema:
         except Exception as e:
             raise ConnectionError(f"Failed to connect to local Ollama daemon: {str(e)}")
 
-    def generate_stream_response(self, system_instruction: str, user_code: str) -> Generator[str, None, None]:
+    def generate_stream_response(self, system_instruction: str, user_code: str, num_predict: int | None = None) -> Generator[str, None, None]:
         """
         NEW: Yields tokens chunk-by-chunk to keep the UI perfectly responsive.
         """
-        cache_key = (system_instruction, user_code)
+        output_limit = num_predict or self.num_predict
+        cache_key = (system_instruction, user_code, str(output_limit))
         cached_response = self._response_cache.get(cache_key)
         if cached_response is not None:
             yield cached_response
@@ -210,7 +257,7 @@ JSON Schema:
                 options={
                     "temperature": self.temperature,
                     "num_ctx": self.num_ctx,
-                    "num_predict": self.num_predict
+                    "num_predict": output_limit
                 },
                 keep_alive=self.keep_alive,
             )
@@ -224,9 +271,10 @@ JSON Schema:
         except Exception as e:
             yield f"\nRuntime Error during streaming: {str(e)}"
 
-    def _generate_local_response(self, system_instruction: str, user_code: str) -> str:
+    def _generate_local_response(self, system_instruction: str, user_code: str, num_predict: int | None = None) -> str:
         # Fallback method kept for synchronous operations/summary steps
-        cache_key = (system_instruction, user_code)
+        output_limit = num_predict or self.num_predict
+        cache_key = (system_instruction, user_code, str(output_limit))
         cached_response = self._response_cache.get(cache_key)
         if cached_response is not None:
             return cached_response
@@ -239,7 +287,7 @@ JSON Schema:
             response = ollama.chat(
                 model=self.model, messages=messages, stream=False,
                 think=False,
-                options={"temperature": self.temperature, "num_ctx": self.num_ctx, "num_predict": self.num_predict},
+                options={"temperature": self.temperature, "num_ctx": self.num_ctx, "num_predict": output_limit},
                 keep_alive=self.keep_alive,
             )
             if hasattr(response, "message") and hasattr(response.message, "content"):
@@ -268,7 +316,11 @@ JSON Schema:
 
     def generate_global_docs(self, metadata_summary: str) -> str:
         prompt = self.GLOBAL_DOCS_PROMPT.format(metadata_summary=metadata_summary)
-        return self._generate_local_response(prompt, metadata_summary)
+        return self._generate_local_response(prompt, metadata_summary, num_predict=1200)
+
+    def generate_global_refactor(self, metadata_summary: str) -> str:
+        prompt = self.GLOBAL_REFACTOR_PROMPT.format(metadata_summary=metadata_summary)
+        return self._generate_local_response(prompt, metadata_summary, num_predict=1200)
 
     def generate_cicd(self, code: str) -> str:
         return self._generate_local_response(self.CICD_PROMPT, code)

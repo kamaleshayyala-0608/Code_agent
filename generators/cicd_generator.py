@@ -3,6 +3,22 @@ import io
 import zipfile
 import json
 
+
+def parse_markdown_file_blocks(text: str) -> dict:
+    """Extract Markdown documents emitted as ``### File: path`` blocks."""
+    headers = list(re.finditer(r"^###\s*File:\s*([^\r\n]+)\s*$", text, re.MULTILINE))
+    files = {}
+    for index, header in enumerate(headers):
+        filepath = re.sub(r"[*`_]", "", header.group(1)).strip()
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        content = text[header.end():end].strip()
+        # Be forgiving if the model still wraps a Markdown document in fences.
+        content = re.sub(r"^```(?:markdown|md)?\s*\n", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"\n```\s*$", "", content).strip()
+        if filepath and content:
+            files[filepath] = content
+    return files
+
 def parse_cicd_output(text: str) -> dict:
     """
     Parses the generated CI/CD markdown text and extracts individual file contents.
