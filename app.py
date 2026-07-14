@@ -600,14 +600,60 @@ with col2:
             if not files_to_process:
                 st.warning("No files found to refactor.")
             else:
-                parsed_jsons = {}
+                # Check if a previous REFACTORING_SPEC.md exists in session state from a prior run
+                prev_spec = None
+                if "pipeline_results" in st.session_state and isinstance(st.session_state.pipeline_results, dict):
+                    prev_refactor = st.session_state.pipeline_results.get("Refactor")
+                    if isinstance(prev_refactor, dict):
+                        prev_spec = prev_refactor.get("REFACTORING_SPEC.md")
+
+                def get_refactor_prompt(fname: str) -> str:
+                    if prev_spec:
+                        return f"""You are a Principal React/TypeScript Software Engineer.
+
+Follow REFACTORING_SPEC.md.
+
+Refactor this file using only those engineering rules.
+
+REFACTORING_SPEC.md:
+{prev_spec}
+
+File Name:
+{fname}
+
+Format:
+
+## File
+{fname}
+
+### Finding 1
+
+Category
+
+Problem
+
+Evidence
+
+Recommendation
+
+Expected Benefit
+
+Estimated Effort
+
+--------------------------------
+
+Repeat for every finding."""
+                    else:
+                        return engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
+
+                raw_outputs = {}
                 if MAX_CONCURRENT_MODEL_REQUESTS > 1:
                     with st.spinner("Refactoring files in parallel..."):
                         import concurrent.futures
                         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
-                                prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
+                                prompt = get_refactor_prompt(fname)
                                 future = executor.submit(engine._generate_local_response, prompt, fcontent)
                                 future_to_file[future] = fname
                                 
@@ -615,64 +661,29 @@ with col2:
                                 fname = future_to_file[future]
                                 try:
                                     raw_output = future.result()
-                                    parsed = parse_json_from_llm(raw_output)
-                                    if "error" in parsed:
-                                        st.error(f"JSON schema error for {fname}: {parsed['error']}")
-                                    parsed_jsons[fname] = parsed
-                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = build_refactor_markdown(parsed)
+                                    raw_outputs[fname] = raw_output
+                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
                                 except Exception as e:
-                                    st.error(f"Failed to parse JSON for {fname}: {e}")
+                                    st.error(f"Failed to refactor {fname}: {e}")
                                     refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Refactoring `{fname}`...")
-                        prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
+                        prompt = get_refactor_prompt(fname)
                         with st.container(border=True):
-                            raw_output = engine._generate_local_response(prompt, fcontent)
-                            st.write("✓ Analysis completed.")
                             try:
-                                parsed = parse_json_from_llm(raw_output)
-                                if "error" in parsed:
-                                    st.error(f"JSON schema error for {fname}: {parsed['error']}")
+                                raw_output = engine._generate_local_response(prompt, fcontent)
+                                st.write("✓ Analysis completed.")
+                                raw_outputs[fname] = raw_output
+                                refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
                             except Exception as e:
-                                st.error(f"Failed to parse JSON for {fname}: {e}")
-                                continue
-                            parsed_jsons[fname] = parsed
-                            refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = build_refactor_markdown(parsed)
-
-                # Generate global report table
-                report_md = ["# Comprehensive Refactoring Report Summary\n"]
-                report_md.append("| File Name | Quality Score | Complexity | Maintainability | Security Issues | Performance Issues | SOLID Violations | Code Smells | Est. Time | Priority |")
-                report_md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-                for fname in files_to_process.keys():
-                    p = parsed_jsons.get(fname, {})
-                    score = p.get("overall_score", "N/A")
-                    complexity = p.get("complexity", {})
-                    cc = complexity.get("cyclomatic_complexity", "N/A")
-                    mi = complexity.get("maintainability", "N/A")
-                    
-                    sec_count = len(p.get("security", [])) if isinstance(p.get("security"), list) else 0
-                    perf_count = len(p.get("performance", [])) if isinstance(p.get("performance"), list) else 0
-                    solid_count = len(p.get("solid_violations", [])) if isinstance(p.get("solid_violations"), list) else 0
-                    smells_count = len(p.get("smells", [])) if isinstance(p.get("smells"), list) else 0
-                    est_time = p.get("estimated_refactoring_time", "N/A")
-                    
-                    suggestions = p.get("suggestions", [])
-                    priorities = [s.get("priority", "Low") for s in suggestions] if isinstance(suggestions, list) else []
-                    highest_priority = "Low"
-                    if "High" in priorities:
-                        highest_priority = "High"
-                    elif "Medium" in priorities:
-                        highest_priority = "Medium"
-                        
-                    report_md.append(f"| `{fname}` | **{score}/100** | {cc} | {mi} | {sec_count} | {perf_count} | {solid_count} | {smells_count} | {est_time} | {highest_priority} |")
-                
-                refactor_results["refactoring_report.md"] = "\n".join(report_md)
+                                st.error(f"Failed to refactor {fname}: {e}")
+                                refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
 
                 # Compile the file-level findings into a project consulting package.
                 refactor_metadata = "\n\n".join(
-                    f"### Analysis for {fname}\n```json\n{json.dumps(parsed, indent=2)}\n```"
-                    for fname, parsed in parsed_jsons.items()
+                    f"### Findings for {fname}\n{raw_output}"
+                    for fname, raw_output in raw_outputs.items()
                 )
                 st.caption("Compiling project-level refactoring guide...")
                 with st.container(border=True):
@@ -687,6 +698,45 @@ with col2:
                         refactor_results.update(parse_markdown_file_blocks(raw_refactor_compilation))
                     except Exception as e:
                         st.error(f"Error during refactoring compilation: {str(e)}")
+
+                # Additional LLM call to generate REFACTORING_SPEC.md
+                st.caption("Generating project-wide refactoring specification...")
+                with st.container(border=True):
+                    try:
+                        spec_prompt = engine.REFACTORING_SPEC_PROMPT.format(metadata_summary=refactor_metadata)
+                        spec_stream = engine.generate_stream_response(
+                            spec_prompt,
+                            "Generate the REFACTORING_SPEC.md document based on the per-file findings.",
+                            num_predict=GLOBAL_COMPILER_TOKENS,
+                        )
+                        raw_spec_output = st.write_stream(spec_stream) or ""
+                        spec_files = parse_markdown_file_blocks(raw_spec_output)
+                        if "REFACTORING_SPEC.md" in spec_files:
+                            refactor_results["REFACTORING_SPEC.md"] = spec_files["REFACTORING_SPEC.md"]
+                        else:
+                            # Heuristic fallback if header missing
+                            clean_spec = raw_spec_output
+                            if clean_spec.strip().startswith("### File:"):
+                                parts = clean_spec.split("\n", 1)
+                                if len(parts) > 1:
+                                    clean_spec = parts[1]
+                            refactor_results["REFACTORING_SPEC.md"] = clean_spec
+                    except Exception as e:
+                        st.error(f"Error during specification generation: {str(e)}")
+
+                # Filter keys to exactly match the requested ZIP structure
+                allowed_keys = {
+                    "REFACTORING_GUIDE.md",
+                    "REFACTORING_SPEC.md",
+                    "COMMON_FUNCTIONS.md",
+                    "COMMON_PATTERNS.md",
+                    "CUSTOM_HOOKS.md",
+                    "MIGRATION_PLAN.md"
+                }
+                for key in list(refactor_results.keys()):
+                    if not key.startswith("FILE_RECOMMENDATIONS/") and key not in allowed_keys:
+                        refactor_results.pop(key, None)
+
                 _render_task_controls("Refactor", refactor_results, active_code_payload)
 
         # 3. Run Technical Documentation Pipeline (File-by-file + Global compiler)

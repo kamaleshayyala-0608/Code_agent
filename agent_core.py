@@ -113,32 +113,42 @@ Use Markdown prose directly after each file header; do not use code fences. Incl
 {metadata_summary}"""
 
     GLOBAL_REFACTOR_PROMPT = """You are a Principal Software Architect.
-Below are per-file refactoring analyses for a project. Produce a consulting-quality, project-level refactoring package.
 
-Do NOT organize the main findings by file. Group related findings by engineering concern, identify all affected files, merge duplicate suggestions, and prioritize risks.
+You have received refactoring findings from multiple files.
+
+Generate:
+
+REFACTORING_GUIDE.md
+
+COMMON_FUNCTIONS.md
+
+CUSTOM_HOOKS.md
+
+COMMON_PATTERNS.md
+
+MIGRATION_PLAN.md
+
+QUICK_WINS.md
+
+REFACTORING_SPEC.md
+
+Summarize repeated engineering patterns.
+
+Identify reusable hooks.
+
+Identify duplicate functions.
+
+Identify repeated API calls.
+
+Identify reusable utilities.
+
+Generate a project-wide refactoring specification.
 
 You MUST format the output as separate Markdown file blocks. Every block starts exactly with:
 ### File: <filename>
 then its Markdown content, with no code fences.
 
-Generate these files:
-1. REFACTORING_GUIDE.md (executive overview and project health score)
-2. EXECUTIVE_SUMMARY.md
-3. PRIORITY_MATRIX.md (Priority, issue, affected files, impact, effort, recommendation)
-4. QUICK_WINS.md
-5. BEFORE_AFTER.md (illustrative before/after examples and benefits)
-6. MIGRATION_PLAN.md (phased roadmap: security, architecture, performance, cleanup)
-7. DESIGN_SMELLS.md
-8. SOLID_VIOLATIONS.md
-9. PERFORMANCE.md
-10. SECURITY.md
-11. ARCHITECT_REMARKS.md
-
-Also generate a per-file recommendations directory named FILE_RECOMMENDATIONS/ containing one markdown file per source file (e.g. FILE_RECOMMENDATIONS/app.md, FILE_RECOMMENDATIONS/agent_core.md).
-
-Be explicit about uncertainty. Use the supplied before_code, after_code, benefits, and estimated_effort when present. Do not invent vulnerabilities or code that are not supported by the analyses.
-
-Per-file analyses:
+Per-file findings:
 {metadata_summary}"""
 
     CICD_PROMPT = """You are a Senior DevOps Engineer.
@@ -163,49 +173,79 @@ Generate a README file describing the deployment architecture, required reposito
 
 Ensure all configurations match the language, framework, dependencies, and requirements found in the analyzed code."""
 
-    REFACTOR_FILE_PROMPT = """You are a Principal Software Engineer.
-Analyze ONLY the provided file. Do NOT analyze the entire project.
+    REFACTOR_FILE_PROMPT = """You are a Principal React/TypeScript Software Engineer.
 
-File Name:
+Analyze ONLY the provided file.
+
+Your goal is NOT to review code quality.
+
+Your goal is to identify concrete refactoring opportunities that improve maintainability, readability and performance while preserving behaviour.
+
+Focus on:
+
+- Duplicate useEffect hooks
+- Redundant API calls
+- Missing useMemo
+- Missing useCallback
+- Incorrect dependency arrays
+- Derived state stored in useState
+- Repeated business logic
+- Functions that should be extracted
+- Reusable custom hooks
+- Common helper methods
+- Duplicate validation logic
+- Duplicate table/grid configuration
+- Expensive rendering
+- Unnecessary re-renders
+- Dead code
+- Unused imports
+- Unused state
+- React anti-patterns
+
+Return your response in Markdown only.
+
+Format:
+
+## File
 {file_name}
 
-You MUST return your analysis strictly as a JSON object matching the schema below. Do not wrap the JSON output in markdown formatting except standard json fenced code blocks, and output no additional conversational text.
+### Finding 1
 
-JSON Schema:
-{{
-  "file_name": "string",
-  "summary": "string describing what this file does",
-  "purpose": "string describing the purpose of the file",
-  "complexity": {{
-    "cyclomatic_complexity": "string",
-    "maintainability": "string"
-  }},
-  "smells": [
-    {{"type": "string", "description": "string"}}
-  ],
-  "performance": [
-    {{"issue": "string", "description": "string"}}
-  ],
-  "security": [
-    {{"issue": "string", "description": "string"}}
-  ],
-  "solid_violations": [
-    {{"principle": "string", "description": "string"}}
-  ],
-  "suggestions": [
-    {{
-      "refactoring": "string",
-      "priority": "Critical/High/Medium/Low",
-      "impact": "string",
-      "before_code": "short illustrative existing code or empty string",
-      "after_code": "short illustrative improved code or empty string",
-      "benefits": ["string"],
-      "estimated_effort": "string"
-    }}
-  ],
-  "estimated_refactoring_time": "string with estimate (e.g. 2 hours)",
-  "overall_score": 85
-}}"""
+Category
+
+Problem
+
+Evidence
+
+Recommendation
+
+Expected Benefit
+
+Estimated Effort
+
+--------------------------------
+
+Repeat for every finding."""
+
+    REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect.
+Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings.
+
+Your response should contain:
+# REFACTORING_SPEC.md
+- Engineering principles
+- Transformation rules
+- Naming conventions
+- Hook usage rules
+- Component structure rules
+- Folder structure recommendations
+- Common reusable patterns
+
+You MUST start your response exactly with the header:
+### File: REFACTORING_SPEC.md
+followed by the markdown content, with no code fences.
+
+Per-file findings:
+{metadata_summary}"""
 
 
     @staticmethod
