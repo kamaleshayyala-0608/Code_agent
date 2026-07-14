@@ -173,7 +173,7 @@ JSON Schema:
         self.model = model_name
         self.temperature = 0
         self.num_ctx = 16384
-        self.num_predict = 1800
+        self.num_predict = 800
         
         try:
             ollama.list()

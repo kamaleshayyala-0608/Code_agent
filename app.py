@@ -74,12 +74,11 @@ def _split_payload_into_files(payload: str) -> dict:
     return files
 
 # ---------------------------------------------------------------------------
-# OPTIMIZATION: Split large payloads into chunks <= 12k chars so they fit
-# comfortably under the 16384-token context window of the model.
-# Small projects (< 12k chars) are not split.
+# OPTIMIZATION: Split large payloads into chunks <= 8k chars for faster processing
+# Small projects (< 8k chars) are not split.
 # ---------------------------------------------------------------------------
-CHUNK_CHAR_LIMIT = 12000
-DEFAULT_FAST_CHAR_LIMIT = 30000
+CHUNK_CHAR_LIMIT = 8000
+DEFAULT_FAST_CHAR_LIMIT = 20000
 MODEL_NAME = "gemma4:26b"
 FAST_MODE = True
 RUN_PARALLEL = True
@@ -234,12 +233,27 @@ except Exception as e:
     )
     st.stop()
 
-MODEL_NAME = "gemma4:26b"
+# Model selection with faster options
+MODEL_OPTIONS = {
+    "gemma4:26b": "High Quality (Slow)",
+    "llama3.1:8b": "Balanced (Medium)",
+    "qwen2.5-coder:7b": "Fast Code Analysis",
+    "qwen2.5-coder:3b": "Very Fast",
+    "phi3:latest": "Ultra Fast"
+}
+
+st.markdown("### 🤖 Model Selection")
+MODEL_NAME = st.selectbox(
+    "Select Ollama Model",
+    options=list(MODEL_OPTIONS.keys()),
+    format_func=lambda x: f"{x} - {MODEL_OPTIONS[x]}",
+    index=0
+)
+
 if MODEL_NAME not in available_models:
-    st.error(f"Required Ollama model not found: `{MODEL_NAME}`")
+    st.error(f"Selected model not found: `{MODEL_NAME}`")
     st.info(
-        "Start Ollama, then install the required model with "
-        "`ollama pull gemma4:26b`, and refresh this page."
+        f"Start Ollama, then install the model with `ollama pull {MODEL_NAME}`, and refresh this page."
     )
     st.stop()
 
