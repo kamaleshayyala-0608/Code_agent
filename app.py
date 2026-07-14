@@ -1,5 +1,6 @@
 import time
 import hashlib
+import concurrent.futures
 import streamlit as st
 from agent_core import LocalCodeAgentEngine
 from generators.cicd_generator import (
@@ -372,15 +373,16 @@ with col1:
 def _render_task_controls(task_name: str, task_data, active_code_payload: str):
     if task_name == "Documentation":
         # task_data is a dict of {filepath: content}
-        zip_bytes = create_zip_from_dict(task_data)
-        st.download_button(
-            label="📥 Download Documentation Package (ZIP)",
-            data=zip_bytes,
-            file_name="documentation.zip",
-            mime="application/zip",
-            use_container_width=True,
-            key="download_doc"
-        )
+        if task_data:
+            zip_bytes = create_zip_from_dict(task_data)
+            st.download_button(
+                label="📥 Download Documentation Package (ZIP)",
+                data=zip_bytes,
+                file_name="documentation.zip",
+                mime="application/zip",
+                use_container_width=True,
+                key="download_doc"
+            )
         
         # Render global documents in expanders
         for filename in ["docs/README.md", "docs/Architecture.md", "docs/API.md", "docs/FolderStructure.md"]:
@@ -400,15 +402,16 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                     
     elif task_name == "Refactor":
         # task_data is a dict of {filepath: content}
-        zip_bytes = create_zip_from_dict(task_data)
-        st.download_button(
-            label="📥 Download Refactoring Package (ZIP)",
-            data=zip_bytes,
-            file_name="refactoring_suggestions.zip",
-            mime="application/zip",
-            use_container_width=True,
-            key="download_refactor"
-        )
+        if task_data:
+            zip_bytes = create_zip_from_dict(task_data)
+            st.download_button(
+                label="📥 Download Refactoring Package (ZIP)",
+                data=zip_bytes,
+                file_name="refactoring_suggestions.zip",
+                mime="application/zip",
+                use_container_width=True,
+                key="download_refactor"
+            )
         
         # Render report summary first
         if "refactoring_report.md" in task_data:
@@ -423,58 +426,61 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                     
     elif task_name == "CI/CD":
         cicd_files = parse_cicd_output(task_data)
-        zip_bytes = create_cicd_zip(cicd_files)
-        prod_score = evaluate_production_score(cicd_files, task_data)
+        if cicd_files:
+            zip_bytes = create_cicd_zip(cicd_files)
+            prod_score = evaluate_production_score(cicd_files, task_data)
+            
+            st.download_button(
+                label="📥 Download CI/CD Package (ZIP)",
+                data=zip_bytes,
+                file_name="cicd.zip",
+                mime="application/zip",
+                use_container_width=True,
+                key="download_cicd"
+            )
         
-        st.download_button(
-            label="📥 Download CI/CD Package (ZIP)",
-            data=zip_bytes,
-            file_name="cicd.zip",
-            mime="application/zip",
-            use_container_width=True,
-            key="download_cicd"
-        )
-        
-        st.markdown("#### 📊 CI/CD Report")
-        has_docker = any("dockerfile" in f.lower() for f in cicd_files.keys())
-        has_github_actions = any("ci.yml" in f.lower() or "cd.yml" in f.lower() for f in cicd_files.keys())
-        has_secrets = "secret" in task_data.lower() or "secrets." in task_data.lower()
-        has_steps = "step" in task_data.lower() or "deploy" in task_data.lower()
-        
-        col_chk1, col_chk2 = st.columns(2)
-        with col_chk1:
-            if has_docker:
-                st.success("✔ **Docker Ready**")
-            else:
-                st.error("❌ **Docker Missing**")
-            if has_github_actions:
-                st.success("✔ **GitHub Actions Ready**")
-            else:
-                st.error("❌ **GitHub Actions Missing**")
-        with col_chk2:
-            if has_secrets:
-                st.success("✔ **Secrets Required**")
-            else:
-                st.warning("⚠ **Secrets Not Specified**")
-            if has_steps:
-                st.success("✔ **Deployment Steps Outlined**")
-            else:
-                st.warning("⚠ **Deployment Steps Missing**")
-                
-        st.metric(label="Production Score", value=f"{prod_score}/100")
-        
-        stack = detect_project_stack(active_code_payload)
-        st.info(f"💡 **Deployment Recommendation:** Deploy using **{stack['Recommendation']}** for this {stack['Framework']} project.")
+        if cicd_files:
+            st.markdown("#### 📊 CI/CD Report")
+            has_docker = any("dockerfile" in f.lower() for f in cicd_files.keys())
+            has_github_actions = any("ci.yml" in f.lower() or "cd.yml" in f.lower() for f in cicd_files.keys())
+            has_secrets = "secret" in task_data.lower() or "secrets." in task_data.lower()
+            has_steps = "step" in task_data.lower() or "deploy" in task_data.lower()
+            
+            col_chk1, col_chk2 = st.columns(2)
+            with col_chk1:
+                if has_docker:
+                    st.success("✔ **Docker Ready**")
+                else:
+                    st.error("❌ **Docker Missing**")
+                if has_github_actions:
+                    st.success("✔ **GitHub Actions Ready**")
+                else:
+                    st.error("❌ **GitHub Actions Missing**")
+            with col_chk2:
+                if has_secrets:
+                    st.success("✔ **Secrets Required**")
+                else:
+                    st.warning("⚠ **Secrets Not Specified**")
+                if has_steps:
+                    st.success("✔ **Deployment Steps Outlined**")
+                else:
+                    st.warning("⚠ **Deployment Steps Missing**")
+                    
+            st.metric(label="Production Score", value=f"{prod_score}/100")
+            
+            stack = detect_project_stack(active_code_payload)
+            st.info(f"💡 **Deployment Recommendation:** Deploy using **{stack['Recommendation']}** for this {stack['Framework']} project.")
 
     elif task_name in ("Review", "Analysis"):
-        st.download_button(
-            label=f"📥 Download {task_name} Report",
-            data=task_data,
-            file_name=f"{task_name.lower()}_report.md",
-            mime="text/markdown",
-            use_container_width=True,
-            key=f"download_{task_name.lower()}"
-        )
+        if task_data:
+            st.download_button(
+                label=f"📥 Download {task_name} Report",
+                data=task_data,
+                file_name=f"{task_name.lower()}_report.md",
+                mime="text/markdown",
+                use_container_width=True,
+                key=f"download_{task_name.lower()}"
+            )
 
 # ---------------------------------------------------------------------------
 # REPORTING PANEL (col2)
@@ -519,7 +525,7 @@ with col2:
         files_to_process = _split_payload_into_files(active_code_payload)
 
         start_total = time.perf_counter()
-        st.session_state.pipeline_results = {}
+        pipeline_results = st.session_state.get("pipeline_results", {})
 
         # 1. Run Monolithic Tasks (Review, Analysis, CI/CD)
         mono_configs = []
@@ -538,19 +544,23 @@ with col2:
                     if len(chunks) > 1:
                         st.caption(f"Processing part {idx+1} of {len(chunks)}...")
                     
-                    stream_generator = engine.generate_stream_response(system_prompt, chunk)
-                    output_text = st.write_stream(stream_generator)
-                    combined_result_chunks.append(output_text)
+                    try:
+                        stream_generator = engine.generate_stream_response(system_prompt, chunk)
+                        output_text = st.write_stream(stream_generator)
+                        if output_text:
+                            combined_result_chunks.append(output_text)
+                    except Exception as e:
+                        st.error(f"Error during streaming: {str(e)}")
                 
                 full_task_text = "\n\n".join(combined_result_chunks)
-                st.session_state.pipeline_results[task_name] = full_task_text
+                pipeline_results[task_name] = full_task_text
                 _render_task_controls(task_name, full_task_text, active_code_payload)
 
         # 2. Run Refactoring Pipeline (File-by-file)
         if do_refactor:
             st.markdown("### ⚙️ Refactoring Suggestions")
             refactor_results = {}
-            st.session_state.pipeline_results["Refactor"] = refactor_results
+            pipeline_results["Refactor"] = refactor_results
 
             if not files_to_process:
                 st.warning("No files found to refactor.")
@@ -629,7 +639,7 @@ with col2:
         if do_document:
             st.markdown("### 📝 Technical Documentation")
             doc_results = {}
-            st.session_state.pipeline_results["Documentation"] = doc_results
+            pipeline_results["Documentation"] = doc_results
 
             if not files_to_process:
                 st.warning("No files found to document.")
@@ -703,8 +713,14 @@ with col2:
                 prompt_global = engine.GLOBAL_DOCS_PROMPT.format(metadata_summary=metadata_summary_text)
                 
                 with st.container(border=True):
-                    stream_generator = engine.generate_stream_response(prompt_global, metadata_summary_text)
-                    raw_global_output = st.write_stream(stream_generator)
+                    try:
+                        stream_generator = engine.generate_stream_response(prompt_global, metadata_summary_text)
+                        raw_global_output = st.write_stream(stream_generator)
+                        if not raw_global_output:
+                            raw_global_output = ""
+                    except Exception as e:
+                        st.error(f"Error during documentation compilation: {str(e)}")
+                        raw_global_output = ""
 
                 global_files = parse_cicd_output(raw_global_output)
                 for path, content in global_files.items():
@@ -718,13 +734,41 @@ with col2:
                 _render_task_controls("Documentation", doc_results, active_code_payload)
 
         total_elapsed = time.perf_counter() - start_total
+        st.session_state.pipeline_results = pipeline_results
         st.session_state.pipeline_duration = total_elapsed
         st.session_state.executed_payload_hash = current_hash
         st.session_state.executed_tasks = current_tasks
         st.session_state.pipeline_executed = True
 
-        st.markdown("### ⏱️ Performance Metric")
-        st.metric(label="Pipeline Duration", value=f"{total_elapsed:.2f} seconds")
+        # Execution Summary
+        st.markdown("### 📊 Execution Summary")
+        completed_tasks = []
+        if do_review:
+            completed_tasks.append("✔ Review Completed")
+        if do_analyze:
+            completed_tasks.append("✔ Analysis Completed")
+        if do_document:
+            completed_tasks.append("✔ Documentation Completed")
+        if do_refactor:
+            completed_tasks.append("✔ Refactor Completed")
+        if do_cicd:
+            completed_tasks.append("✔ CI/CD Generated")
+        
+        col_sum1, col_sum2 = st.columns(2)
+        with col_sum1:
+            for task in completed_tasks:
+                st.markdown(task)
+        with col_sum2:
+            st.markdown(f"**Total Files:** {len(files_to_process)}")
+            st.markdown(f"**Characters:** {len(active_code_payload):,}")
+            st.markdown(f"**Chunks:** {len(chunks)}")
+            st.markdown(f"**Pipeline Time:** {total_elapsed:.1f} sec")
+
+        st.markdown("### ⏱️ Performance Metrics")
+        scan_time = st.session_state.get("_last_scan_time", 0)
+        st.metric(label="Folder Scan", value=f"{scan_time:.2f}s")
+        st.metric(label="LLM Processing", value=f"{total_elapsed - scan_time:.2f}s")
+        st.metric(label="Total", value=f"{total_elapsed:.2f}s")
 
     elif st.session_state.pipeline_executed:
         task_configs = []
@@ -754,7 +798,23 @@ with col2:
                         st.markdown(task_data)
                     _render_task_controls(task_name, task_data, active_code_payload)
 
-        st.markdown("### ⏱️ Performance Metric")
-        st.metric(label="Pipeline Duration", value=f"{st.session_state.pipeline_duration:.2f} seconds")
+        st.markdown("### ⏱️ Performance Metrics")
+        scan_time = st.session_state.get("_last_scan_time", 0)
+        st.metric(label="Folder Scan", value=f"{scan_time:.2f}s")
+        st.metric(label="LLM Processing", value=f"{st.session_state.pipeline_duration - scan_time:.2f}s")
+        st.metric(label="Total", value=f"{st.session_state.pipeline_duration:.2f}s")
     else:
-        st.info("ℹ️ Awaiting execution. Provide code on the left and click **Execute Pipeline**.")
+        if final_code_payload.strip():
+            stack = detect_project_stack(final_code_payload)
+            file_count = final_code_payload.count("--- FILE:")
+            if file_count == 0:
+                file_count = 1  # Single snippet
+            
+            st.markdown("### 📋 Project Status")
+            st.success("✔ Project Loaded")
+            st.markdown(f"**Files:** {file_count}")
+            st.markdown(f"**Language:** `{stack['Language']}`")
+            st.markdown(f"**Framework:** `{stack['Framework']}`")
+            st.info("Ready to Execute")
+        else:
+            st.info("ℹ️ Awaiting execution. Provide code on the left and click **Execute Pipeline**.")
