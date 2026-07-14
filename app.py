@@ -233,27 +233,12 @@ except Exception as e:
     )
     st.stop()
 
-# Model selection with faster options
-MODEL_OPTIONS = {
-    "gemma4:26b": "High Quality (Slow)",
-    "llama3.1:8b": "Balanced (Medium)",
-    "qwen2.5-coder:7b": "Fast Code Analysis",
-    "qwen2.5-coder:3b": "Very Fast",
-    "phi3:latest": "Ultra Fast"
-}
-
-st.markdown("### 🤖 Model Selection")
-MODEL_NAME = st.selectbox(
-    "Select Ollama Model",
-    options=list(MODEL_OPTIONS.keys()),
-    format_func=lambda x: f"{x} - {MODEL_OPTIONS[x]}",
-    index=0
-)
-
+MODEL_NAME = "gemma4:26b"
 if MODEL_NAME not in available_models:
-    st.error(f"Selected model not found: `{MODEL_NAME}`")
+    st.error(f"Required Ollama model not found: `{MODEL_NAME}`")
     st.info(
-        f"Start Ollama, then install the model with `ollama pull {MODEL_NAME}`, and refresh this page."
+        "Start Ollama, then install the required model with "
+        "`ollama pull gemma4:26b`, and refresh this page."
     )
     st.stop()
 
