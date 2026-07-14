@@ -4,6 +4,8 @@ from typing import Dict, Any, Generator
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
+REQUIRED_MODEL_NAME = "gemma4:26b"
+
 class LocalCodeAgentEngine:
     """
     Core engine for interacting with the local Ollama daemon.
@@ -169,11 +171,16 @@ JSON Schema:
             return [m.get("model", m.get("name", "")) for m in res["models"]]
         return []
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = REQUIRED_MODEL_NAME):
         self.model = model_name
         self.temperature = 0
-        self.num_ctx = 16384
-        self.num_predict = 800
+        # The UI sends at most 8k characters per request (~2k tokens).  A
+        # smaller context and concise response budget greatly reduce latency on
+        # a local 26B model without truncating the input.
+        self.num_ctx = 8192
+        self.num_predict = 384
+        self.keep_alive = "15m"
+        self._response_cache: Dict[tuple[str, str], str] = {}
         
         try:
             ollama.list()
@@ -184,6 +191,12 @@ JSON Schema:
         """
         NEW: Yields tokens chunk-by-chunk to keep the UI perfectly responsive.
         """
+        cache_key = (system_instruction, user_code)
+        cached_response = self._response_cache.get(cache_key)
+        if cached_response is not None:
+            yield cached_response
+            return
+
         messages = [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_code}
@@ -193,20 +206,31 @@ JSON Schema:
                 model=self.model,
                 messages=messages,
                 stream=True,  # Crucial for 26B model responsiveness
+                think=False,  # Reports need answers, not a visible reasoning trace.
                 options={
                     "temperature": self.temperature,
                     "num_ctx": self.num_ctx,
                     "num_predict": self.num_predict
-                }
+                },
+                keep_alive=self.keep_alive,
             )
+            response_parts = []
             for chunk in response_stream:
                 if 'message' in chunk and 'content' in chunk['message']:
-                    yield chunk['message']['content']
+                    content = chunk['message']['content']
+                    response_parts.append(content)
+                    yield content
+            self._response_cache[cache_key] = "".join(response_parts)
         except Exception as e:
             yield f"\nRuntime Error during streaming: {str(e)}"
 
     def _generate_local_response(self, system_instruction: str, user_code: str) -> str:
         # Fallback method kept for synchronous operations/summary steps
+        cache_key = (system_instruction, user_code)
+        cached_response = self._response_cache.get(cache_key)
+        if cached_response is not None:
+            return cached_response
+
         messages = [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_code}
@@ -214,13 +238,21 @@ JSON Schema:
         try:
             response = ollama.chat(
                 model=self.model, messages=messages, stream=False,
-                options={"temperature": self.temperature, "num_ctx": self.num_ctx, "num_predict": self.num_predict}
+                think=False,
+                options={"temperature": self.temperature, "num_ctx": self.num_ctx, "num_predict": self.num_predict},
+                keep_alive=self.keep_alive,
             )
             if hasattr(response, "message") and hasattr(response.message, "content"):
-                return response.message.content or ""
+                content = response.message.content or ""
+                self._response_cache[cache_key] = content
+                return content
             if isinstance(response, dict):
-                return response.get("message", {}).get("content", "")
-            return str(response)
+                content = response.get("message", {}).get("content", "")
+                self._response_cache[cache_key] = content
+                return content
+            content = str(response)
+            self._response_cache[cache_key] = content
+            return content
         except Exception as e:
             raise RuntimeError(f"Error during model generation: {str(e)}")
 

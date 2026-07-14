@@ -2,7 +2,7 @@ import time
 import hashlib
 import concurrent.futures
 import streamlit as st
-from agent_core import LocalCodeAgentEngine
+from agent_core import LocalCodeAgentEngine, REQUIRED_MODEL_NAME
 from generators.cicd_generator import (
     parse_cicd_output,
     create_cicd_zip,
@@ -79,9 +79,12 @@ def _split_payload_into_files(payload: str) -> dict:
 # ---------------------------------------------------------------------------
 CHUNK_CHAR_LIMIT = 8000
 DEFAULT_FAST_CHAR_LIMIT = 20000
-MODEL_NAME = "gemma4:26b"
+MODEL_NAME = REQUIRED_MODEL_NAME
 FAST_MODE = True
-RUN_PARALLEL = True
+# Ollama generally schedules requests for one loaded model serially. Submitting
+# many 26B requests at once increases queueing and VRAM pressure instead of
+# reducing total report time.
+MAX_CONCURRENT_MODEL_REQUESTS = 1
 
 def _split_into_chunks(text: str, chunk_size: int = CHUNK_CHAR_LIMIT) -> list:
     """
@@ -117,20 +120,12 @@ def _trim_payload(text: str, max_chars: int) -> str:
     if len(file_blocks) == 1:
         return text[:max_chars]
 
-    trimmed_blocks = []
-    used = 0
-    for idx, block in enumerate(file_blocks):
-        if idx > 0:
-            block = "--- FILE:" + block
-        block_len = len(block)
-        if used + block_len > max_chars:
-            break
-        trimmed_blocks.append(block)
-        used += block_len
-
-    if not trimmed_blocks:
-        return text[:max_chars]
-    return "\n".join(trimmed_blocks)
+    # A single large file used to consume the entire fast-mode budget, so the
+    # remaining uploaded files never reached Review, Analysis, or CI/CD. Give
+    # every file a fair share of the prompt instead.
+    blocks = [file_blocks[0]] + ["--- FILE:" + block for block in file_blocks[1:]]
+    per_file_budget = max(1, max_chars // len(blocks))
+    return "\n".join(block[:per_file_budget] for block in blocks)
 
 def detect_project_stack(payload: str) -> dict:
     """
@@ -233,7 +228,6 @@ except Exception as e:
     )
     st.stop()
 
-MODEL_NAME = "gemma4:26b"
 if MODEL_NAME not in available_models:
     st.error(f"Required Ollama model not found: `{MODEL_NAME}`")
     st.info(
@@ -244,7 +238,6 @@ if MODEL_NAME not in available_models:
 
 fast_mode = FAST_MODE
 max_code_chars = DEFAULT_FAST_CHAR_LIMIT
-run_parallel = RUN_PARALLEL
 
 engine = get_agent_engine(MODEL_NAME)
 
@@ -254,6 +247,7 @@ engine = get_agent_engine(MODEL_NAME)
 st.title("🧠 Ollama-Powered Code Intelligence Agent")
 st.markdown("A local enterprise-grade Code Review, Analysis, and Documentation tool.")
 st.markdown("Analyze single snippets, batch-uploaded files, or an entire local POC repository.")
+st.caption(f"Model: `{MODEL_NAME}` · concise mode enabled for faster reporting")
 
 col1, col2 = st.columns(2)
 
@@ -565,10 +559,10 @@ with col2:
                 st.warning("No files found to refactor.")
             else:
                 parsed_jsons = {}
-                if run_parallel:
+                if MAX_CONCURRENT_MODEL_REQUESTS > 1:
                     with st.spinner("Refactoring files in parallel..."):
                         import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
                                 prompt = engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
@@ -644,10 +638,10 @@ with col2:
                 st.warning("No files found to document.")
             else:
                 parsed_jsons = {}
-                if run_parallel:
+                if MAX_CONCURRENT_MODEL_REQUESTS > 1:
                     with st.spinner("Documenting files in parallel..."):
                         import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
                                 prompt = engine.DOCUMENT_FILE_PROMPT.format(file_name=fname)
