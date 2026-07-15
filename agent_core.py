@@ -25,12 +25,14 @@ def parse_stage1_output(text: str) -> list:
             "Evidence": "",
             "Current Code": "",
             "Recommendation": "",
+            "Improved Code": "",
+            "Implementation Notes": "",
             "Expected Benefit": "",
             "Estimated Effort": "",
             "Priority": ""
         }
         
-        headers = ["Category", "Problem", "Evidence", "Current Code", "Recommendation", "Expected Benefit", "Estimated Effort", "Priority"]
+        headers = ["Category", "Problem", "Evidence", "Current Code", "Recommendation", "Improved Code", "Implementation Notes", "Expected Benefit", "Estimated Effort", "Priority"]
         positions = {}
         for h in headers:
             match = re.search(r"(?:^|\n)\s*" + re.escape(h) + r"\s*(?:\r?\n|$)", block, re.IGNORECASE)
@@ -677,9 +679,9 @@ Per-file findings:
 
 
     def refactor_file(self, file_name: str, file_content: str) -> str:
-        return self.refactor_file_two_stage(file_name, file_content)
+        return self.refactor_file_two_stage(file_name, file_content, generate_complete_file=False)
 
-    def refactor_file_two_stage(self, file_name: str, file_content: str, prev_spec: str = None) -> str:
+    def refactor_file_two_stage(self, file_name: str, file_content: str, prev_spec: str = None, generate_complete_file: bool = False) -> str:
         # Import dynamically to avoid circular import issues
         from generators.cicd_generator import extract_complete_refactored_file
         
@@ -696,7 +698,9 @@ Follow the rules in this REFACTORING_SPEC.md:
         stage1_output = self._generate_local_response(stage1_prompt, file_content)
         
         if "No refactoring required" in stage1_output or not stage1_output.strip():
-            report = f"## File\n{file_name}\n\nNo refactoring required.\n\n### Complete Refactored File\n\n```\n{file_content}\n```"
+            report = f"## File\n{file_name}\n\nNo refactoring required."
+            if generate_complete_file:
+                report += f"\n\n### Complete Refactored File\n\n```\n{file_content}\n```"
             return report
 
         # Parse findings from Stage 1
@@ -816,27 +820,39 @@ Priority
             assembled_findings.append(finding_md)
             improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{improved_code}\n")
 
-        # 3. Assemble the final complete refactored file
-        improvements_summary_str = "\n".join(improvements_summary)
+        # Build final markdown report
+        final_report = []
+        final_report.append(f"## File\n{file_name}\n")
+        final_report.append("\n\n--------------------------------\n\n".join(assembled_findings))
         
-        def run_assembly_and_retry():
-            prefix = ""
-            if prev_spec:
-                prefix = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
-            assembly_prompt = prefix + self.REFACTOR_FILE_ASSEMBLE_PROMPT.format(
-                original_content=file_content,
-                improvements=improvements_summary_str
-            )
-            raw_out = self._generate_local_response(assembly_prompt, file_content)
-            
-            has_header = False
-            for header in ["Complete Refactored File", "Final Refactored Code", "Refactored File", "Merged Code"]:
-                if header.lower() in raw_out.lower():
-                    has_header = True
-                    break
-            
-            if not has_header:
-                retry_prompt = f"""You previously generated a response but did not include the '### Complete Refactored File' section.
+        # 3. Assemble the final complete refactored file only if requested
+        if generate_complete_file:
+            improvements_summary_str = "\n".join(improvements_summary)
+            refactored_code = self._run_assembly(file_name, file_content, improvements_summary_str, prev_spec)
+            final_report.append("\n\n--------------------------------\n\n### Complete Refactored File\n")
+            final_report.append(f"```\n{refactored_code}\n```")
+        
+        return "\n".join(final_report)
+
+    def _run_assembly(self, file_name: str, file_content: str, improvements_summary_str: str, prev_spec: str = None) -> str:
+        from generators.cicd_generator import extract_complete_refactored_file
+        prefix = ""
+        if prev_spec:
+            prefix = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
+        assembly_prompt = prefix + self.REFACTOR_FILE_ASSEMBLE_PROMPT.format(
+            original_content=file_content,
+            improvements=improvements_summary_str
+        )
+        raw_out = self._generate_local_response(assembly_prompt, file_content)
+        
+        has_header = False
+        for header in ["Complete Refactored File", "Final Refactored Code", "Refactored File", "Merged Code"]:
+            if header.lower() in raw_out.lower():
+                has_header = True
+                break
+        
+        if not has_header:
+            retry_prompt = f"""You previously generated a response but did not include the '### Complete Refactored File' section.
 Please generate the COMPLETE refactored file now. Merge all the improvements into the original file.
 Return ONLY the code.
 
@@ -849,27 +865,40 @@ Improvements:
 CRITICAL INSTRUCTION:
 Return your response under the header '### Complete Refactored File' and include the complete code.
 """
-                raw_out = self._generate_local_response(retry_prompt, file_content)
-            return raw_out
-
-        raw_assembly = run_assembly_and_retry()
-        
-        refactored_code = extract_complete_refactored_file(raw_assembly)
+            raw_out = self._generate_local_response(retry_prompt, file_content)
+            
+        refactored_code = extract_complete_refactored_file(raw_out)
         if not refactored_code:
-            code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", raw_assembly)
+            code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", raw_out)
             if code_match:
                 refactored_code = code_match.group(1).strip()
             else:
-                refactored_code = raw_assembly.strip()
+                refactored_code = raw_out.strip()
+        return refactored_code
 
-        # Build final markdown report
-        final_report = []
-        final_report.append(f"## File\n{file_name}\n")
-        final_report.append("\n\n--------------------------------\n\n".join(assembled_findings))
-        final_report.append("\n\n--------------------------------\n\n### Complete Refactored File\n")
-        final_report.append(f"```\n{refactored_code}\n```")
-        
-        return "\n".join(final_report)
+    def assemble_refactored_file(self, file_name: str, file_content: str, findings_text: str, prev_spec: str = None) -> str:
+        findings = parse_stage1_output(findings_text)
+        improvements_summary = []
+        for idx, finding in enumerate(findings):
+            current_code = finding.get("Current Code", "")
+            improved_code = finding.get("Improved Code", "")
+            
+            clean_current_code = current_code
+            if clean_current_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_current_code)
+                if code_match:
+                    clean_current_code = code_match.group(1).strip()
+            
+            clean_improved_code = improved_code
+            if clean_improved_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_improved_code)
+                if code_match:
+                    clean_improved_code = code_match.group(1).strip()
+            
+            improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{clean_improved_code}\n")
+            
+        improvements_summary_str = "\n".join(improvements_summary)
+        return self._run_assembly(file_name, file_content, improvements_summary_str, prev_spec)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:

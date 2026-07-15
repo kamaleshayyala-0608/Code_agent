@@ -451,10 +451,58 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                 st.markdown(task_data["SUMMARY.md"])
                 
         # Render per-file recommendations separately from consulting documents.
-        for filename, content in task_data.items():
-            if filename.startswith("FILE_RECOMMENDATIONS/"):
-                with st.expander(f"📄 Suggestions for {filename}", expanded=False):
-                    st.markdown(content)
+        recommendation_keys = sorted([k for k in task_data.keys() if k.startswith("FILE_RECOMMENDATIONS/")])
+        
+        for file_key in recommendation_keys:
+            fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
+            refactored_code_key = f"REFACTORED_CODE/{fname}"
+            has_complete_file = refactored_code_key in task_data
+            
+            with st.container(border=True):
+                st.write(f"📄 **Suggestions for {fname}**")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    show_suggestions = st.checkbox(f"🔍 View Suggestions", value=True, key=f"show_sug_{fname}")
+                with col_btn2:
+                    generate_btn = st.button(
+                        "📄 Generate Complete Refactored File" if not has_complete_file else "✓ Complete File Generated",
+                        key=f"btn_gen_{fname}",
+                        disabled=has_complete_file,
+                        use_container_width=True
+                    )
+                
+                if generate_btn:
+                    with st.spinner(f"Assembling complete refactored file for {fname}..."):
+                        original_files = _split_payload_into_files(active_code_payload)
+                        original_content = original_files.get(fname, "")
+                        
+                        if original_content:
+                            prev_spec = None
+                            if "pipeline_results" in st.session_state and isinstance(st.session_state.pipeline_results, dict):
+                                prev_refactor = st.session_state.pipeline_results.get("Refactor")
+                                if isinstance(prev_refactor, dict):
+                                    prev_spec = prev_refactor.get("REFACTORING_SPEC.md")
+                                    
+                            findings_text = task_data[file_key]
+                            
+                            try:
+                                complete_code = engine.assemble_refactored_file(fname, original_content, findings_text, prev_spec=prev_spec)
+                                task_data[refactored_code_key] = complete_code
+                                
+                                # Append Complete Refactored File code block to suggestions report
+                                updated_report = findings_text + f"\n\n--------------------------------\n\n### Complete Refactored File\n\n```\n{complete_code}\n```"
+                                task_data[file_key] = updated_report
+                                
+                                st.success(f"Successfully generated refactored file for {fname}!")
+                                st.rerun()
+                            except Exception as ex:
+                                st.error(f"Failed to generate complete refactored file: {str(ex)}")
+                        else:
+                            st.error(f"Could not find original file content for {fname}")
+                
+                if show_suggestions:
+                    st.markdown(task_data[file_key])
 
     elif task_name in ("Review", "Analysis"):
         if task_data:
@@ -607,7 +655,7 @@ Repeat for every finding."""
                         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
-                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, prev_spec)
+                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, prev_spec, False)
                                 future_to_file[future] = fname
                                 
                             for future in concurrent.futures.as_completed(future_to_file):
@@ -627,7 +675,7 @@ Repeat for every finding."""
                         st.caption(f"Refactoring `{fname}`...")
                         with st.container(border=True):
                             try:
-                                raw_output = engine.refactor_file_two_stage(fname, fcontent, prev_spec)
+                                raw_output = engine.refactor_file_two_stage(fname, fcontent, prev_spec, False)
                                 st.write("✓ Analysis completed.")
                                 raw_outputs[fname] = raw_output
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
