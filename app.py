@@ -1,4 +1,5 @@
 import time
+import re
 import hashlib
 import json
 import concurrent.futures
@@ -118,7 +119,7 @@ FAST_MODE = True
 # many 26B requests at once increases queueing and VRAM pressure instead of
 # reducing total report time.
 MAX_CONCURRENT_MODEL_REQUESTS = 1
-GLOBAL_COMPILER_TOKENS = 4096
+GLOBAL_COMPILER_TOKENS = 12000
 
 def _split_into_chunks(text: str, chunk_size: int = CHUNK_CHAR_LIMIT) -> list:
     """
@@ -445,9 +446,9 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                 st.markdown(task_data["REFACTORING_GUIDE.md"])
 
         # Render report summary first
-        if "refactoring_report.md" in task_data:
+        if "SUMMARY.md" in task_data:
             with st.expander("📋 Comprehensive Refactoring Report Summary", expanded=True):
-                st.markdown(task_data["refactoring_report.md"])
+                st.markdown(task_data["SUMMARY.md"])
                 
         # Render per-file recommendations separately from consulting documents.
         for filename, content in task_data.items():
@@ -606,8 +607,7 @@ Repeat for every finding."""
                         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
-                                prompt = get_refactor_prompt(fname)
-                                future = executor.submit(engine._generate_local_response, prompt, fcontent)
+                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, prev_spec)
                                 future_to_file[future] = fname
                                 
                             for future in concurrent.futures.as_completed(future_to_file):
@@ -625,10 +625,9 @@ Repeat for every finding."""
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Refactoring `{fname}`...")
-                        prompt = get_refactor_prompt(fname)
                         with st.container(border=True):
                             try:
-                                raw_output = engine._generate_local_response(prompt, fcontent)
+                                raw_output = engine.refactor_file_two_stage(fname, fcontent, prev_spec)
                                 st.write("✓ Analysis completed.")
                                 raw_outputs[fname] = raw_output
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
@@ -644,19 +643,37 @@ Repeat for every finding."""
                     f"### Findings for {fname}\n{raw_output}"
                     for fname, raw_output in raw_outputs.items()
                 )
-                st.caption("Compiling project-level refactoring guide...")
-                with st.container(border=True):
-                    try:
-                        compiler_prompt = engine.GLOBAL_REFACTOR_PROMPT.format(metadata_summary=refactor_metadata)
-                        compiler_stream = engine.generate_stream_response(
-                            compiler_prompt,
-                            "Generate the requested refactoring package from the analyses in your instructions.",
-                            num_predict=GLOBAL_COMPILER_TOKENS,
-                        )
-                        raw_refactor_compilation = st.write_stream(compiler_stream) or ""
-                        refactor_results.update(parse_markdown_file_blocks(raw_refactor_compilation))
-                    except Exception as e:
-                        st.error(f"Error during refactoring compilation: {str(e)}")
+                global_prompts = [
+                    ("REFACTORING_GUIDE.md", engine.GLOBAL_REFACTORING_GUIDE_PROMPT),
+                    ("COMMON_FUNCTIONS.md", engine.GLOBAL_COMMON_FUNCTIONS_PROMPT),
+                    ("CUSTOM_HOOKS.md", engine.GLOBAL_CUSTOM_HOOKS_PROMPT),
+                    ("COMMON_PATTERNS.md", engine.GLOBAL_COMMON_PATTERNS_PROMPT),
+                    ("MIGRATION_PLAN.md", engine.GLOBAL_MIGRATION_PLAN_PROMPT),
+                    ("REFACTORED_FILES.md", engine.GLOBAL_REFACTORED_FILES_PROMPT)
+                ]
+                for doc_name, prompt_template in global_prompts:
+                    st.caption(f"Compiling project-level {doc_name}...")
+                    with st.container(border=True):
+                        try:
+                            prompt = prompt_template.format(metadata_summary=refactor_metadata)
+                            stream = engine.generate_stream_response(
+                                prompt,
+                                f"Generate the requested {doc_name} file.",
+                                num_predict=GLOBAL_COMPILER_TOKENS,
+                            )
+                            raw_out = st.write_stream(stream) or ""
+                            parsed_files = parse_markdown_file_blocks(raw_out)
+                            if parsed_files:
+                                refactor_results.update(parsed_files)
+                            else:
+                                clean_out = raw_out
+                                if clean_out.strip().startswith("### File:"):
+                                    parts = clean_out.split("\n", 1)
+                                    if len(parts) > 1:
+                                        clean_out = parts[1]
+                                refactor_results[doc_name] = clean_out.strip()
+                        except Exception as e:
+                            st.error(f"Error compiling {doc_name}: {str(e)}")
 
                 # Additional LLM call to generate REFACTORING_SPEC.md
                 st.caption("Generating project-wide refactoring specification...")
@@ -683,6 +700,48 @@ Repeat for every finding."""
                     except Exception as e:
                         st.error(f"Error during specification generation: {str(e)}")
 
+                # Programmatically build SUMMARY.md
+                summary_lines = []
+                summary_lines.append("# Refactoring Summary Report\n")
+                summary_lines.append(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                summary_lines.append("## Files Analyzed and Recommendations\n")
+
+                total_findings = 0
+                critical_findings = 0
+                high_findings = 0
+                medium_findings = 0
+                low_findings = 0
+
+                for file_key, file_content in refactor_results.items():
+                    if file_key.startswith("FILE_RECOMMENDATIONS/"):
+                        fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
+                        findings_count = len(re.findall(r"###\s*Finding\s*\d+", file_content, re.IGNORECASE))
+                        total_findings += findings_count
+                        
+                        critical_findings += len(re.findall(r"Priority\s*[\r\n]+Critical", file_content, re.IGNORECASE))
+                        high_findings += len(re.findall(r"Priority\s*[\r\n]+High", file_content, re.IGNORECASE))
+                        medium_findings += len(re.findall(r"Priority\s*[\r\n]+Medium", file_content, re.IGNORECASE))
+                        low_findings += len(re.findall(r"Priority\s*[\r\n]+Low", file_content, re.IGNORECASE))
+                        
+                        has_refactored_code = f"REFACTORED_CODE/{fname}" in refactor_results
+                        code_status = "Generated" if has_refactored_code else "No refactoring required"
+                        summary_lines.append(f"- **{fname}**: {findings_count} finding(s) | Refactored Code: {code_status}")
+
+                summary_lines.append("\n## Findings by Priority\n")
+                summary_lines.append(f"- 🔴 **Critical**: {critical_findings}")
+                summary_lines.append(f"- 🟠 **High**: {high_findings}")
+                summary_lines.append(f"- 🟡 **Medium**: {medium_findings}")
+                summary_lines.append(f"- 🟢 **Low**: {low_findings}")
+                summary_lines.append(f"- **Total Findings**: {total_findings}\n")
+
+                summary_lines.append("## Next Steps\n")
+                summary_lines.append("1. Review `REFACTORING_GUIDE.md` for the roadmap phase details.")
+                summary_lines.append("2. Adhere to coding standards defined in `REFACTORING_SPEC.md`.")
+                summary_lines.append("3. Extract common functions and hooks as specified in `COMMON_FUNCTIONS.md` and `CUSTOM_HOOKS.md`.")
+                summary_lines.append("4. Follow the step-by-step execution in `MIGRATION_PLAN.md`.")
+
+                refactor_results["SUMMARY.md"] = "\n".join(summary_lines)
+
                 # Filter keys to exactly match the requested ZIP structure
                 allowed_keys = {
                     "REFACTORING_GUIDE.md",
@@ -691,7 +750,8 @@ Repeat for every finding."""
                     "COMMON_PATTERNS.md",
                     "CUSTOM_HOOKS.md",
                     "MIGRATION_PLAN.md",
-                    "REFACTORED_FILES.md"
+                    "REFACTORED_FILES.md",
+                    "SUMMARY.md"
                 }
                 for key in list(refactor_results.keys()):
                     if (

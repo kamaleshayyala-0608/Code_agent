@@ -175,15 +175,32 @@ def create_zip_from_dict(files_dict: dict) -> bytes:
 def extract_complete_refactored_file(text: str) -> str:
     """
     Extracts the complete refactored file content from the refactoring findings.
-    Looks for code blocks under the '### Complete Refactored File' section.
+    Supports multiple header variations: Complete Refactored File, Final Refactored Code, Refactored File, Merged Code.
     """
-    match = re.search(r"###\s*Complete\s*Refactored\s*File\s*([\s\S]*)", text, re.IGNORECASE)
+    headers = [
+        r"###\s*Complete\s*Refactored\s*File",
+        r"Complete\s*Refactored\s*File",
+        r"###\s*Final\s*Refactored\s*Code",
+        r"Final\s*Refactored\s*Code",
+        r"###\s*Refactored\s*File",
+        r"Refactored\s*File",
+        r"###\s*Merged\s*Code",
+        r"Merged\s*Code"
+    ]
+    
+    match = None
+    for header in headers:
+        pattern = r"(?:^|\n)\s*" + header + r"\s*(?:\r?\n|$)([\s\S]*)"
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            break
+            
     if not match:
         return ""
     
     content = match.group(1).strip()
     
-    # Remove any trailing section (e.g. '### Refactoring Priority')
+    # Remove any trailing section (e.g. '### Refactoring Priority' or dividers)
     divider_match = re.search(r"^(?:--------------------------------|###\s*\w+)", content, re.MULTILINE)
     if divider_match:
         content = content[:divider_match.start()].strip()

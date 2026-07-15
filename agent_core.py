@@ -1,10 +1,55 @@
 import os
+import re
 import ollama
 from typing import Dict, Any, Generator
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
 REQUIRED_MODEL_NAME = "gemma4:26b"
+
+def parse_stage1_output(text: str) -> list:
+    if "No refactoring required" in text or not text.strip():
+        return []
+    
+    findings_blocks = re.split(r"###\s*Finding\s*\d+", text, flags=re.IGNORECASE)
+    findings = []
+    
+    for block in findings_blocks[1:]:
+        block = block.strip()
+        if not block:
+            continue
+        
+        fields = {
+            "Category": "",
+            "Problem": "",
+            "Evidence": "",
+            "Current Code": "",
+            "Recommendation": "",
+            "Expected Benefit": "",
+            "Estimated Effort": "",
+            "Priority": ""
+        }
+        
+        headers = ["Category", "Problem", "Evidence", "Current Code", "Recommendation", "Expected Benefit", "Estimated Effort", "Priority"]
+        positions = {}
+        for h in headers:
+            match = re.search(r"(?:^|\n)\s*" + re.escape(h) + r"\s*(?:\r?\n|$)", block, re.IGNORECASE)
+            if match:
+                positions[h] = (match.start(), match.end())
+        
+        sorted_headers = sorted(positions.keys(), key=lambda x: positions[x][0])
+        
+        for idx, h in enumerate(sorted_headers):
+            start_idx = positions[h][1]
+            end_idx = positions[sorted_headers[idx+1]][0] if idx + 1 < len(sorted_headers) else len(block)
+            content = block[start_idx:end_idx].strip()
+            content = re.sub(r"^[-=\s]+", "", content)
+            content = re.sub(r"(?:^|\n)\s*-{3,}\s*$", "", content)
+            fields[h] = content.strip()
+            
+        findings.append(fields)
+    return findings
+
 
 class LocalCodeAgentEngine:
     """
@@ -160,20 +205,31 @@ then its Markdown content, with no surrounding code fences or blocks. Do not wra
 Per-file findings:
 {metadata_summary}"""
 
-    REFACTOR_FILE_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+    REFACTOR_FILE_PROMPT = """CRITICAL INSTRUCTION
+
+Your response is INVALID unless every finding contains ALL of the following sections:
+
+Current Code
+Recommendation
+Improved Code
+Implementation Notes
+Expected Benefit
+Estimated Effort
+
+Never skip Improved Code.
+Never summarize code.
+Never write "...existing code..."
+Generate COMPLETE replacement code.
+
+If no improvements exist, explicitly state:
+"No refactoring required."
+
+Always finish with
+### Complete Refactored File
+Return ONLY the complete code.
+
+You are a Principal Software Engineer and Enterprise Architect.
 Analyze ONLY the provided file: {file_name}
-
-IMPORTANT
-For EVERY finding you MUST generate BOTH
-1. Current Code
-2. Improved Code
-
-Never recommend a change without generating the replacement implementation.
-The Improved Code must be complete and directly replaceable.
-Never generate pseudo code.
-Never omit imports.
-Never shorten functions.
-Always return production-ready code.
 
 Your goal is to identify concrete, architecture-aware, high-impact refactoring opportunities that improve maintainability, readability, scalability, and performance while strictly preserving behavior.
 You must perform a deep layer-by-layer engineering analysis across the following dimensions:
@@ -225,44 +281,37 @@ Evidence
 --------------------------------
 
 Current Code
-
-Copy ONLY the exact code snippet from the uploaded file that needs refactoring.
-
-Do NOT modify it.
+[Copy ONLY the exact code snippet from the uploaded file that needs refactoring. Do NOT modify it.]
 
 --------------------------------
 
 Recommendation
-
-Explain what should be improved.
+[Explain what should be improved.]
 
 --------------------------------
 
 Improved Code
-
-Generate the COMPLETE improved implementation.
-
-Rules:
-• Preserve functionality.
-• Do not use pseudo code.
-• Do not use comments like "...existing code..."
-• Generate production-ready code.
-• Return the ENTIRE function/class.
-• Include imports if required.
-• The code should be directly replaceable.
+[Generate the COMPLETE improved implementation.]
 
 --------------------------------
 
 Implementation Notes
-
-Explain why this implementation is better.
+[Explain why this implementation is better.]
 
 --------------------------------
 
 Expected Benefit
+[Describe the expected benefit]
+
+--------------------------------
 
 Estimated Effort
 [Provide an estimate of effort, e.g., Low (1-2 hours), Medium (half day), High (1-2 days)]
+
+--------------------------------
+
+Priority
+[Critical, High, Medium, or Low]
 
 --------------------------------
 
@@ -270,32 +319,226 @@ Estimated Effort
 
 --------------------------------
 
-### Common Functions / Routines
-[Identify all reusable helper functions, API integration logic, validation logic, formatting utilities, or custom state hooks. Explicitly specify the recommended target path and filename for extraction (e.g., hooks/useAuth.ts, utils/formatters.ts, services/api.ts) and describe the extracted API surface.]
-
---------------------------------
-
-### Performance Improvements
-[Provide a list of runtime performance optimizations. For React, detail React.memo, useMemo, useCallback usage, virtualized lists, or chunked rendering. For general code, detail algorithmic improvements, memory footprint reduction, or async optimization.]
-
---------------------------------
-
 ### Complete Refactored File
 
-Merge ALL improvements into one final version.
+[Generate the COMPLETE updated file. Return ONLY code. Do NOT explain anything.]
+"""
 
-Generate the COMPLETE updated file.
+    REFACTOR_FILE_STAGE1_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+Analyze ONLY the provided file: {file_name}
 
-The generated file should compile successfully.
+Your goal is to identify concrete, architecture-aware, high-impact refactoring opportunities that improve maintainability, readability, scalability, and performance while strictly preserving behavior.
+You must perform a deep layer-by-layer engineering analysis across the following dimensions:
+1. Component Structure & Modularization
+2. State & Hook Management
+3. API, Data Ingestion, and Caching
+4. Logic Duplication and Extraction
+5. Rendering Performance & Memoization
+6. Code Quality, Typing, and Robustness
 
-Return ONLY code.
+If no improvements exist, explicitly state:
+"No refactoring required."
 
-Do NOT explain anything.
+Otherwise, return your response in Markdown using the EXACT structure below. Ensure you do not omit any of the headers or the horizontal dividers (---), as downstream parsers rely on this specific syntax.
+Do NOT generate Improved Code, Implementation Notes, or the Complete Refactored File. Only identify the findings and recommendations.
+
+## File
+{file_name}
+
+### Finding 1
+
+Category
+[Category Name]
+
+Problem
+[Provide a rigorous, architecture-aware explanation of the code smell, anti-pattern, or performance bottleneck.]
+
+Evidence
+```[language]
+[Paste the specific code snippet(s) from the file demonstrating the problem]
+```
 
 --------------------------------
 
-### Refactoring Priority
-[Indicate the overall priority: Critical, High, Medium, or Low, based on the highest priority finding discovered. Provide a one-sentence justification.]"""
+Current Code
+[Copy ONLY the exact code snippet from the uploaded file that needs refactoring. Do NOT modify it.]
+
+--------------------------------
+
+Recommendation
+[Explain what should be improved.]
+
+--------------------------------
+
+Expected Benefit
+[Describe the expected benefit]
+
+--------------------------------
+
+Estimated Effort
+[Low/Medium/High]
+
+--------------------------------
+
+Priority
+[Critical/High/Medium/Low]
+
+--------------------------------
+
+[Repeat the Findings block above for each additional finding, separating them with the 32-hyphen divider: --------------------------------]
+"""
+
+    REFACTOR_FINDING_STAGE2_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+You are refactoring the file: {file_name}
+
+We have identified a refactoring opportunity:
+Category: {category}
+Problem: {problem}
+Recommendation: {recommendation}
+
+Here is the Current Code that needs refactoring:
+```
+{current_code}
+```
+
+Generate the following sections for this finding:
+1. Improved Code: Generate the COMPLETE improved implementation.
+Rules:
+- Preserve functionality.
+- Do not use pseudo code.
+- Do not use comments like "...existing code..."
+- Generate production-ready code.
+- Return the ENTIRE function/class.
+- Include imports if required.
+- The code should be directly replaceable.
+
+2. Implementation Notes: Explain why this implementation is better.
+
+Format your response EXACTLY as follows:
+
+Improved Code
+```[language]
+[Complete improved code]
+```
+
+--------------------------------
+
+Implementation Notes
+[Explain why this implementation is better]
+"""
+
+    REFACTOR_FILE_ASSEMBLE_PROMPT = """You are a Principal Software Engineer.
+Below is the original file and the list of refactoring improvements that need to be merged.
+Generate the COMPLETE refactored file.
+
+Original File:
+{original_content}
+
+Improvements:
+{improvements}
+
+CRITICAL INSTRUCTION:
+Generate the COMPLETE replacement code.
+Never skip code.
+Never summarize code.
+Never write "...existing code..."
+Return ONLY the complete code.
+
+Always finish with:
+### Complete Refactored File
+Return ONLY the complete code.
+"""
+
+    GLOBAL_REFACTORING_GUIDE_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the REFACTORING_GUIDE.md file.
+
+Provide an executive architectural summary. Outline the major technical debt trends discovered across the codebase (e.g., coupling of UI and logic, lack of caching, rendering bottlenecks, loose typing). Detail the high-level strategy for addressing these issues. Include a prioritized refactoring roadmap categorizing efforts into Phase 1 (Quick Wins / Critical), Phase 2 (Medium Effort / High Value), and Phase 3 (Structural / Architectural).
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: REFACTORING_GUIDE.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
+
+    GLOBAL_COMMON_FUNCTIONS_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the COMMON_FUNCTIONS.md file.
+
+Systematically identify all duplicate helper functions, utility methods, validation logic, formatting code, and calculations across different files. Recommend specific target locations for extraction (e.g., utils/formatters.ts, services/api.ts). For each recommended utility:
+- Define the input/output signature.
+- Provide a brief specification.
+- List all source files that should be updated to use this shared utility.
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: COMMON_FUNCTIONS.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
+
+    GLOBAL_CUSTOM_HOOKS_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the CUSTOM_HOOKS.md file.
+
+Identify opportunities to extract stateful or side-effect-heavy logic into reusable custom hooks (e.g., useApiFetch, useFormValidation, useDebounce). For each proposed hook, explain:
+- The problem it solves and why standard components should delegate to it.
+- Its internal state and side effects.
+- The precise API surface (inputs, outputs).
+- List the components that will consume this hook.
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: CUSTOM_HOOKS.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
+
+    GLOBAL_COMMON_PATTERNS_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the COMMON_PATTERNS.md file.
+
+Outline architectural pattern changes and software engineering best practices that should be applied globally across the codebase (e.g., transition to repository pattern for data access, structured error-boundary strategies, standardized loading/error state schemas for all views). Contrast the current sub-optimal patterns with the recommended clean patterns using conceptual code structures.
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: COMMON_PATTERNS.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
+
+    GLOBAL_MIGRATION_PLAN_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the MIGRATION_PLAN.md file.
+
+Provide a concrete, step-by-step technical plan for migrating the codebase from its current state to the refactored architecture. Address risk mitigation, dependency ordering (which modules to refactor first to prevent breaking down-stream dependencies), testing strategies (how to verify behavior remains identical), and roll-out recommendation.
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: MIGRATION_PLAN.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
+
+    GLOBAL_REFACTORED_FILES_PROMPT = """You are a Principal Software Architect and Technical Director.
+You have received detailed refactoring findings from multiple files across the project.
+Generate the REFACTORED_FILES.md file.
+
+For every source file, generate:
+- File Name
+- Reason for Refactoring
+- Complete Refactored Code
+- Migration Notes
+
+The generated code must be production-ready and preserve behaviour. Return the COMPLETE code.
+
+You MUST format the output as a Markdown file block. Start exactly with:
+### File: REFACTORED_FILES.md
+followed by the markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
+
+Per-file findings:
+{metadata_summary}"""
 
     REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect and Lead Quality Engineer.
 Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings. This specification will act as the engineering standards document for all code modifications, ensuring all developers on the team adhere to identical conventions.
@@ -434,8 +677,199 @@ Per-file findings:
 
 
     def refactor_file(self, file_name: str, file_content: str) -> str:
-        prompt = self.REFACTOR_FILE_PROMPT.format(file_name=file_name)
-        return self._generate_local_response(prompt, file_content)
+        return self.refactor_file_two_stage(file_name, file_content)
+
+    def refactor_file_two_stage(self, file_name: str, file_content: str, prev_spec: str = None) -> str:
+        # Import dynamically to avoid circular import issues
+        from generators.cicd_generator import extract_complete_refactored_file
+        
+        # 1. Run Stage 1 to find recommendations
+        stage1_prompt = ""
+        if prev_spec:
+            stage1_prompt = f"""You are a Principal Software Engineer.
+Follow the rules in this REFACTORING_SPEC.md:
+{prev_spec}
+
+"""
+        stage1_prompt += self.REFACTOR_FILE_STAGE1_PROMPT.format(file_name=file_name)
+        
+        stage1_output = self._generate_local_response(stage1_prompt, file_content)
+        
+        if "No refactoring required" in stage1_output or not stage1_output.strip():
+            report = f"## File\n{file_name}\n\nNo refactoring required.\n\n### Complete Refactored File\n\n```\n{file_content}\n```"
+            return report
+
+        # Parse findings from Stage 1
+        findings = parse_stage1_output(stage1_output)
+        if not findings:
+            single_prompt = self.REFACTOR_FILE_PROMPT.format(file_name=file_name)
+            return self._generate_local_response(single_prompt, file_content)
+
+        # 2. Run Stage 2 for each finding to get Improved Code and Implementation Notes
+        assembled_findings = []
+        improvements_summary = []
+        
+        for idx, finding in enumerate(findings):
+            category = finding.get("Category", "Refactoring Opportunity")
+            problem = finding.get("Problem", "")
+            evidence = finding.get("Evidence", "")
+            current_code = finding.get("Current Code", "")
+            recommendation = finding.get("Recommendation", "")
+            expected_benefit = finding.get("Expected Benefit", "")
+            estimated_effort = finding.get("Estimated Effort", "")
+            priority = finding.get("Priority", "")
+            
+            clean_current_code = current_code
+            if clean_current_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_current_code)
+                if code_match:
+                    clean_current_code = code_match.group(1).strip()
+            
+            if not clean_current_code or not recommendation:
+                improved_code = ""
+                impl_notes = ""
+            else:
+                stage2_prompt = ""
+                if prev_spec:
+                    stage2_prompt = f"""You are a Principal Software Engineer.
+Follow the rules in this REFACTORING_SPEC.md:
+{prev_spec}
+
+"""
+                stage2_prompt += self.REFACTOR_FINDING_STAGE2_PROMPT.format(
+                    file_name=file_name,
+                    category=category,
+                    problem=problem,
+                    recommendation=recommendation,
+                    current_code=clean_current_code
+                )
+                stage2_output = self._generate_local_response(stage2_prompt, file_content)
+                
+                improved_code = ""
+                impl_notes = ""
+                
+                imp_match = re.search(r"Improved\s*Code\s*([\s\S]*?)(?:Implementation\s*Notes|$)", stage2_output, re.IGNORECASE)
+                notes_match = re.search(r"Implementation\s*Notes\s*([\s\S]*)", stage2_output, re.IGNORECASE)
+                
+                if imp_match:
+                    improved_code_raw = imp_match.group(1).strip()
+                    code_block_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", improved_code_raw)
+                    if code_block_match:
+                        improved_code = code_block_match.group(1).strip()
+                    else:
+                        improved_code = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\n", "", improved_code_raw)
+                        improved_code = re.sub(r"\n```$", "", improved_code).strip()
+                if notes_match:
+                    impl_notes = notes_match.group(1).strip()
+                    impl_notes = re.sub(r"^[-\s]+", "", impl_notes).strip()
+                    
+            # Assemble findings
+            finding_md = f"""### Finding {idx+1}
+
+Category
+{category}
+
+Problem
+{problem}
+
+Evidence
+{evidence}
+
+--------------------------------
+
+Current Code
+```
+{clean_current_code}
+```
+
+--------------------------------
+
+Recommendation
+{recommendation}
+
+--------------------------------
+
+Improved Code
+```
+{improved_code}
+```
+
+--------------------------------
+
+Implementation Notes
+{impl_notes}
+
+--------------------------------
+
+Expected Benefit
+{expected_benefit}
+
+--------------------------------
+
+Estimated Effort
+{estimated_effort}
+
+--------------------------------
+
+Priority
+{priority}"""
+            assembled_findings.append(finding_md)
+            improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{improved_code}\n")
+
+        # 3. Assemble the final complete refactored file
+        improvements_summary_str = "\n".join(improvements_summary)
+        
+        def run_assembly_and_retry():
+            prefix = ""
+            if prev_spec:
+                prefix = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
+            assembly_prompt = prefix + self.REFACTOR_FILE_ASSEMBLE_PROMPT.format(
+                original_content=file_content,
+                improvements=improvements_summary_str
+            )
+            raw_out = self._generate_local_response(assembly_prompt, file_content)
+            
+            has_header = False
+            for header in ["Complete Refactored File", "Final Refactored Code", "Refactored File", "Merged Code"]:
+                if header.lower() in raw_out.lower():
+                    has_header = True
+                    break
+            
+            if not has_header:
+                retry_prompt = f"""You previously generated a response but did not include the '### Complete Refactored File' section.
+Please generate the COMPLETE refactored file now. Merge all the improvements into the original file.
+Return ONLY the code.
+
+Original File:
+{file_content}
+
+Improvements:
+{improvements_summary_str}
+
+CRITICAL INSTRUCTION:
+Return your response under the header '### Complete Refactored File' and include the complete code.
+"""
+                raw_out = self._generate_local_response(retry_prompt, file_content)
+            return raw_out
+
+        raw_assembly = run_assembly_and_retry()
+        
+        refactored_code = extract_complete_refactored_file(raw_assembly)
+        if not refactored_code:
+            code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", raw_assembly)
+            if code_match:
+                refactored_code = code_match.group(1).strip()
+            else:
+                refactored_code = raw_assembly.strip()
+
+        # Build final markdown report
+        final_report = []
+        final_report.append(f"## File\n{file_name}\n")
+        final_report.append("\n\n--------------------------------\n\n".join(assembled_findings))
+        final_report.append("\n\n--------------------------------\n\n### Complete Refactored File\n")
+        final_report.append(f"```\n{refactored_code}\n```")
+        
+        return "\n".join(final_report)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:
