@@ -5,12 +5,8 @@ import concurrent.futures
 import streamlit as st
 from agent_core import LocalCodeAgentEngine, REQUIRED_MODEL_NAME
 from generators.cicd_generator import (
-    parse_cicd_output,
     parse_markdown_file_blocks,
-    create_cicd_zip,
-    evaluate_production_score,
     parse_json_from_llm,
-    build_refactor_markdown,
     build_doc_markdown,
     create_zip_from_dict
 )
@@ -393,7 +389,6 @@ with col1:
     do_analyze = st.checkbox("Analyze Code (Complexity & Flow)", value=False)
     do_document = st.checkbox("Document Code (README Generation)", value=False)
     do_refactor = st.checkbox("Refactor Code (Readability & Design)", value=False)
-    do_cicd = st.checkbox("Generate CI/CD Pipeline", value=False)
 
     execute = st.button("🚀 Execute Pipeline", use_container_width=True, type="primary")
 
@@ -458,53 +453,6 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
             if filename.startswith("FILE_RECOMMENDATIONS/"):
                 with st.expander(f"📄 Suggestions for {filename}", expanded=False):
                     st.markdown(content)
-                    
-    elif task_name == "CI/CD":
-        cicd_files = parse_cicd_output(task_data)
-        if cicd_files:
-            zip_bytes = create_cicd_zip(cicd_files)
-            prod_score = evaluate_production_score(cicd_files, task_data)
-            
-            st.download_button(
-                label="📥 Download CI/CD Package (ZIP)",
-                data=zip_bytes,
-                file_name="cicd.zip",
-                mime="application/zip",
-                use_container_width=True,
-                key="download_cicd"
-            )
-        
-        if cicd_files:
-            st.markdown("#### 📊 CI/CD Report")
-            has_docker = any("dockerfile" in f.lower() for f in cicd_files.keys())
-            has_github_actions = any("ci.yml" in f.lower() or "cd.yml" in f.lower() for f in cicd_files.keys())
-            has_secrets = "secret" in task_data.lower() or "secrets." in task_data.lower()
-            has_steps = "step" in task_data.lower() or "deploy" in task_data.lower()
-            
-            col_chk1, col_chk2 = st.columns(2)
-            with col_chk1:
-                if has_docker:
-                    st.success("✔ **Docker Ready**")
-                else:
-                    st.error("❌ **Docker Missing**")
-                if has_github_actions:
-                    st.success("✔ **GitHub Actions Ready**")
-                else:
-                    st.error("❌ **GitHub Actions Missing**")
-            with col_chk2:
-                if has_secrets:
-                    st.success("✔ **Secrets Required**")
-                else:
-                    st.warning("⚠ **Secrets Not Specified**")
-                if has_steps:
-                    st.success("✔ **Deployment Steps Outlined**")
-                else:
-                    st.warning("⚠ **Deployment Steps Missing**")
-                    
-            st.metric(label="Production Score", value=f"{prod_score}/100")
-            
-            stack = detect_project_stack(active_code_payload)
-            st.info(f"💡 **Deployment Recommendation:** Deploy using **{stack['Recommendation']}** for this {stack['Framework']} project.")
 
     elif task_name in ("Review", "Analysis"):
         if task_data:
@@ -524,7 +472,7 @@ with col2:
     st.subheader("Reporting Panel")
 
     current_hash = _content_hash(final_code_payload)
-    current_tasks = [do_review, do_analyze, do_document, do_refactor, do_cicd]
+    current_tasks = [do_review, do_analyze, do_document, do_refactor]
 
     # Clear persistence state if payload or selected tasks change
     if (st.session_state.get("executed_payload_hash") != current_hash 
@@ -568,8 +516,6 @@ with col2:
             mono_configs.append(("Review", engine.REVIEW_PROMPT, "### 🛡️ Code Review Audit"))
         if do_analyze:
             mono_configs.append(("Analysis", engine.ANALYSIS_PROMPT, "### 🏗️ Architecture & Complexity Analysis"))
-        if do_cicd:
-            mono_configs.append(("CI/CD", engine.CICD_PROMPT, "### 🚀 CI/CD Pipeline"))
 
         for task_name, system_prompt, header_text in mono_configs:
             st.markdown(header_text)
@@ -857,8 +803,6 @@ Repeat for every finding."""
             completed_tasks.append("✔ Documentation Completed")
         if do_refactor:
             completed_tasks.append("✔ Refactor Completed")
-        if do_cicd:
-            completed_tasks.append("✔ CI/CD Generated")
         
         col_sum1, col_sum2 = st.columns(2)
         with col_sum1:
@@ -886,8 +830,6 @@ Repeat for every finding."""
             task_configs.append(("Documentation", "### 📝 Technical Documentation"))
         if do_refactor:
             task_configs.append(("Refactor", "### ⚙️ Refactoring Suggestions"))
-        if do_cicd:
-            task_configs.append(("CI/CD", "### 🚀 CI/CD Pipeline"))
 
         active_code_payload = final_code_payload
         if fast_mode and len(active_code_payload) > max_code_chars:

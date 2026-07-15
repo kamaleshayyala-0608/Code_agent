@@ -112,107 +112,75 @@ For FolderStructure.md, explicitly present:
 Use Markdown prose directly after each file header; do not use code fences. Include an ASCII folder tree, dependency and execution-flow descriptions where relevant. Only state facts supported by the supplied metadata:
 {metadata_summary}"""
 
-    GLOBAL_REFACTOR_PROMPT = """You are a Principal Software Architect.
+    GLOBAL_REFACTOR_PROMPT = """You are a Principal Software Architect and Technical Director.
 
-You have received refactoring findings from multiple files. Analyze them to produce a project-level refactoring package.
+You have received detailed refactoring findings from multiple files across the project. Your job is to perform a cross-module, architecture-aware synthesis of these findings and produce a highly structured, project-level refactoring package.
+This package must guide the engineering team on consolidating duplicate logic, introducing robust abstractions, and refactoring codebases systematically.
 
-Generate:
+You MUST generate the following files:
 
-REFACTORING_GUIDE.md
+1. ### File: REFACTORING_GUIDE.md
+Provide an executive architectural summary. Outline the major technical debt trends discovered across the codebase (e.g., coupling of UI and logic, lack of caching, rendering bottlenecks, loose typing). Detail the high-level strategy for addressing these issues. Include a prioritized refactoring roadmap categorizing efforts into Phase 1 (Quick Wins / Critical), Phase 2 (Medium Effort / High Value), and Phase 3 (Structural / Architectural).
 
-COMMON_FUNCTIONS.md
+2. ### File: COMMON_FUNCTIONS.md
+Systematically identify all duplicate helper functions, utility methods, validation logic, formatting code, and calculations across different files. Recommend specific target locations for extraction (e.g., utils/formatters.ts, services/api.ts). For each recommended utility:
+- Define the input/output signature.
+- Provide a brief specification.
+- List all source files that should be updated to use this shared utility.
 
-CUSTOM_HOOKS.md
+3. ### File: CUSTOM_HOOKS.md
+Identify opportunities to extract stateful or side-effect-heavy logic into reusable custom hooks (e.g., useApiFetch, useFormValidation, useDebounce). For each proposed hook, explain:
+- The problem it solves and why standard components should delegate to it.
+- Its internal state and side effects.
+- The precise API surface (inputs, outputs).
+- List the components that will consume this hook.
 
-COMMON_PATTERNS.md
+4. ### File: COMMON_PATTERNS.md
+Outline architectural pattern changes and software engineering best practices that should be applied globally across the codebase (e.g., transition to repository pattern for data access, structured error-boundary strategies, standardized loading/error state schemas for all views). Contrast the current sub-optimal patterns with the recommended clean patterns using conceptual code structures.
 
-MIGRATION_PLAN.md
-
-REFACTORING_SPEC.md
-
-Detailed requirements for generated files:
-
-1. COMMON_FUNCTIONS.md:
-Identify duplicate helper functions, shared API logic, shared validation, shared formatting, shared table configuration, and shared calculations. Recommend extraction locations (e.g. hooks/usePCRAnalysis.ts, utils/formatters.ts).
-
-2. CUSTOM_HOOKS.md:
-Identify custom hooks that should be created (e.g. usePCRAnalysis(), useGridColumns(), useAnalysisHistory()) and explain why.
-
-3. REFACTORING_SPEC.md:
-Generate reusable engineering rules covering:
-- React conventions
-- Hook conventions
-- State management rules
-- Performance rules
-- Folder structure rules
-- Naming conventions
-- Component structure
-- API patterns
-- Transformation rules
+5. ### File: MIGRATION_PLAN.md
+Provide a concrete, step-by-step technical plan for migrating the codebase from its current state to the refactored architecture. Address risk mitigation, dependency ordering (which modules to refactor first to prevent breaking down-stream dependencies), testing strategies (how to verify behavior remains identical), and roll-out recommendation.
 
 You MUST format the output as separate Markdown file blocks. Every block starts exactly with:
 ### File: <filename>
-then its Markdown content, with no code fences.
+then its Markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
 
 Per-file findings:
 {metadata_summary}"""
 
-    CICD_PROMPT = """You are a Senior DevOps Engineer.
-Analyze the uploaded/scanned codebase.
-Generate production-ready CI/CD configuration files tailored to the detected tech stack.
+    REFACTOR_FILE_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+Analyze ONLY the provided file: {file_name}
 
-You MUST format your response as a collection of separate file blocks. For each file you generate, start with a header exactly in the format:
-### File: <relative_filepath>
-followed by the code block.
+Your goal is to identify concrete, architecture-aware, high-impact refactoring opportunities that improve maintainability, readability, scalability, and performance while strictly preserving behavior.
+You must perform a deep layer-by-layer engineering analysis across the following dimensions:
+1. Component Structure & Modularization:
+   - Single Responsibility Principle (SRP) violations.
+   - Candidates for splitting large files/components (e.g., components over 200 lines, nested markup).
+   - Component rendering complexity (too many inline calculations, excessive prop drilling).
+2. State & Hook Management (specifically for React/TS, or corresponding state patterns):
+   - Redundant or derived state stored in useState instead of being calculated on the fly.
+   - Duplicate or overlapping useEffect hooks.
+   - Incorrect or missing dependency arrays in useEffect, useMemo, or useCallback.
+   - Lack of cleanup functions in subscription/listener hooks.
+   - Overuse of state triggering infinite render loops.
+3. API, Data Ingestion, and Caching:
+   - Duplicate, sequential, or un-batched API requests.
+   - Missing caching layers, debouncing, or throttling for user interactions/search input.
+   - Lack of robust error handling and loading indicators.
+4. Logic Duplication and Extraction:
+   - Business logic coupled to the presentation layer.
+   - Utility or helper functions inside components that could be extracted to pure functions.
+   - Shared algorithms or calculations that are candidates for domain services or shared utils.
+5. Rendering Performance & Memoization:
+   - Expensive calculations running on every render (missing useMemo).
+   - Unnecessary re-renders caused by inline object/array references or inline callbacks (missing useCallback).
+   - Missing virtualization for long lists/tables.
+6. Code Quality, Typing, and Robustness:
+   - Loose types (any, unknown) where strict types or interfaces are possible.
+   - Code readability, naming conventions, magic numbers, or lack of self-documenting code.
+   - Security vulnerabilities (e.g., unsafe input handling, sensitive information exposure).
 
-Include:
-1. ### File: Dockerfile
-Generate a production-ready, multi-stage build Dockerfile. Make sure it runs as a non-root user for security and pins specific versions of base images.
-2. ### File: docker-compose.yml
-Generate a docker-compose.yml configuration with appropriate volume mounting, port mapping, environment variables, restart policies, and resource constraints/limits.
-3. ### File: .github/workflows/ci.yml
-Generate a GitHub Actions workflow for Continuous Integration (CI) that runs linting, formatting check, and automated tests. Use dependency caching for faster run times.
-4. ### File: .github/workflows/cd.yml
-Generate a GitHub Actions workflow for Continuous Deployment (CD) that builds the Docker image and pushes/deploys it to a production target using secure secrets.
-5. ### File: README_CICD.md
-Generate a README file describing the deployment architecture, required repository secrets (e.g., credentials, tokens), local run instructions, and production recommendations.
-
-Ensure all configurations match the language, framework, dependencies, and requirements found in the analyzed code."""
-
-    REFACTOR_FILE_PROMPT = """You are a Principal React/TypeScript Software Engineer.
-
-Analyze ONLY the provided file.
-
-Your goal is NOT to review code quality.
-
-Your goal is to identify concrete refactoring opportunities that improve maintainability, readability and performance while preserving behaviour.
-
-Focus on:
-
-- Duplicate useEffect hooks
-- Redundant API calls
-- Missing useMemo
-- Missing useCallback
-- Incorrect dependency arrays
-- Derived state stored in useState
-- Repeated business logic
-- Functions that should be extracted
-- Reusable custom hooks
-- Common helper methods
-Analyze ONLY the provided file. Your goal is to identify concrete refactoring opportunities that improve maintainability, readability, and performance while preserving behaviour.
-
-Perform a layer-by-layer engineering analysis focusing on:
-- Layer 1 – Component Structure (multiple responsibilities, split candidates, large render, large files, repeated JSX)
-- Layer 2 – React Hooks (duplicate useEffect, incorrect dependency arrays, stale closures, missing cleanup, missing useMemo/useCallback, derived state in useState, unnecessary updates, infinite render risks)
-- Layer 3 – API Layer (duplicate/sequential requests, missing caching, repeated fetch logic, loading optimization, error handling)
-- Layer 4 – Functions (duplicate helpers, redundant/dead functions, extraction candidates, shared routines, repeated business logic)
-- Layer 5 – Rendering Performance (unnecessary re-renders, expensive calculations, inline objects/callbacks, missing React.memo, prop chains)
-- Layer 6 – Business Logic (duplicate validation, transformations, sorting, filtering, repeated calculations)
-- Layer 7 – Code Reuse (opportunities to extract custom hooks, utility functions, shared components, API services, constants, config modules)
-
-Return your response in Markdown only using the exact structure below.
-
-Format:
+Return your response in Markdown using the EXACT structure below. Ensure you do not omit any of the headers or the horizontal dividers (---), as downstream parsers rely on this specific syntax.
 
 ## File
 {file_name}
@@ -220,64 +188,60 @@ Format:
 ### Finding 1
 
 Category
-[Category Name]
+[Category Name - e.g., Component Structure, State Management, API Layer, Logic Duplication, Performance, Security]
 
 Problem
-[Problem Description]
+[Provide a rigorous, architecture-aware explanation of the code smell, anti-pattern, or performance bottleneck. Explain exactly why this is a concern in an enterprise application.]
 
 Evidence
-[Code Evidence]
+```[language]
+[Paste the specific code snippet(s) from the file demonstrating the problem]
+```
 
 Recommendation
-[Recommendation Detail]
+[Provide detailed, implementation-ready refactoring instructions. Include an example of how the refactored code should look, ensuring it aligns with modern engineering best practices and architectural principles.]
 
 Expected Benefit
-[Expected Benefit]
+[Specify the architectural or runtime impact, such as reduced bundle size, faster render cycles, lower memory footprint, or improved maintainability/testability.]
 
 Estimated Effort
-[Estimated Effort]
+[Provide an estimate of effort, e.g., Low (1-2 hours), Medium (half day), High (1-2 days)]
 
 --------------------------------
 
-Repeat the findings block above for every finding.
+[Repeat the Findings block above for each additional finding, separating them with the 32-hyphen divider: --------------------------------]
 
 --------------------------------
 
 ### Common Functions / Routines
-List reusable functions.
-Recommend extraction into:
-hooks/
-utils/
-services/
+[Identify all reusable helper functions, API integration logic, validation logic, formatting utilities, or custom state hooks. Explicitly specify the recommended target path and filename for extraction (e.g., hooks/useAuth.ts, utils/formatters.ts, services/api.ts) and describe the extracted API surface.]
 
 --------------------------------
 
 ### Performance Improvements
-List React-specific improvements.
+[Provide a list of runtime performance optimizations. For React, detail React.memo, useMemo, useCallback usage, virtualized lists, or chunked rendering. For general code, detail algorithmic improvements, memory footprint reduction, or async optimization.]
 
 --------------------------------
 
 ### Refactoring Priority
-[Critical/High/Medium/Low]"""
+[Indicate the overall priority: Critical, High, Medium, or Low, based on the highest priority finding discovered. Provide a one-sentence justification.]"""
 
-    REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect.
-Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings.
+    REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect and Lead Quality Engineer.
+Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings. This specification will act as the engineering standards document for all code modifications, ensuring all developers on the team adhere to identical conventions.
 
-Your response should contain:
-# REFACTORING_SPEC.md
-- React conventions
-- Hook conventions
-- State management rules
-- Performance rules
-- Folder structure rules
-- Naming conventions
-- Component structure
-- API patterns
-- Transformation rules
+Your document must cover the following sections in detail:
+1. React & Component Conventions (e.g., functional components, proper hooks placement, prop typing).
+2. Hook & Side-Effect Conventions (e.g., custom hooks vs inline effects, dependency array strictness, cleanup guarantees).
+3. State Management Rules (e.g., local state vs global context, avoiding derived state in state variables, state normalization).
+4. Runtime & Rendering Performance Rules (e.g., when to use useMemo/useCallback/React.memo, virtualization criteria, avoiding inline objects).
+5. Folder & Module Structure Rules (e.g., feature-based vs layer-based layout, strict import boundaries, forbidden circular dependencies).
+6. Naming & Case Conventions (e.g., components, files, hooks, utils, variables, types/interfaces).
+7. API & Integration Patterns (e.g., unified fetch wrappers, request/response interceptors, strict type definitions for all payloads).
+8. Data Transformation & Validation Rules (e.g., parsing/validation at system boundaries, decoupling raw API models from UI models).
 
 You MUST start your response exactly with the header:
 ### File: REFACTORING_SPEC.md
-followed by the markdown content, with no code fences.
+followed by the markdown content, with no surrounding code fences or formatting characters on the header line.
 
 Per-file findings:
 {metadata_summary}"""
@@ -397,8 +361,6 @@ Per-file findings:
         prompt = self.GLOBAL_REFACTOR_PROMPT.format(metadata_summary=metadata_summary)
         return self._generate_local_response(prompt, metadata_summary, num_predict=1200)
 
-    def generate_cicd(self, code: str) -> str:
-        return self._generate_local_response(self.CICD_PROMPT, code)
 
     def refactor_file(self, file_name: str, file_content: str) -> str:
         prompt = self.REFACTOR_FILE_PROMPT.format(file_name=file_name)
