@@ -141,6 +141,18 @@ Outline architectural pattern changes and software engineering best practices th
 5. ### File: MIGRATION_PLAN.md
 Provide a concrete, step-by-step technical plan for migrating the codebase from its current state to the refactored architecture. Address risk mitigation, dependency ordering (which modules to refactor first to prevent breaking down-stream dependencies), testing strategies (how to verify behavior remains identical), and roll-out recommendation.
 
+6. ### File: REFACTORED_FILES.md
+For every source file
+Generate:
+File Name
+Reason for Refactoring
+Complete Refactored Code
+Migration Notes
+
+The generated code must be production-ready.
+The generated code must preserve behaviour.
+Return the COMPLETE code.
+
 You MUST format the output as separate Markdown file blocks. Every block starts exactly with:
 ### File: <filename>
 then its Markdown content, with no surrounding code fences or blocks. Do not wrap the file names in backticks, asterisks, or any other formatting characters.
@@ -150,6 +162,18 @@ Per-file findings:
 
     REFACTOR_FILE_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
 Analyze ONLY the provided file: {file_name}
+
+IMPORTANT
+For EVERY finding you MUST generate BOTH
+1. Current Code
+2. Improved Code
+
+Never recommend a change without generating the replacement implementation.
+The Improved Code must be complete and directly replaceable.
+Never generate pseudo code.
+Never omit imports.
+Never shorten functions.
+Always return production-ready code.
 
 Your goal is to identify concrete, architecture-aware, high-impact refactoring opportunities that improve maintainability, readability, scalability, and performance while strictly preserving behavior.
 You must perform a deep layer-by-layer engineering analysis across the following dimensions:
@@ -198,11 +222,44 @@ Evidence
 [Paste the specific code snippet(s) from the file demonstrating the problem]
 ```
 
+--------------------------------
+
+Current Code
+
+Copy ONLY the exact code snippet from the uploaded file that needs refactoring.
+
+Do NOT modify it.
+
+--------------------------------
+
 Recommendation
-[Provide detailed, implementation-ready refactoring instructions. Include an example of how the refactored code should look, ensuring it aligns with modern engineering best practices and architectural principles.]
+
+Explain what should be improved.
+
+--------------------------------
+
+Improved Code
+
+Generate the COMPLETE improved implementation.
+
+Rules:
+• Preserve functionality.
+• Do not use pseudo code.
+• Do not use comments like "...existing code..."
+• Generate production-ready code.
+• Return the ENTIRE function/class.
+• Include imports if required.
+• The code should be directly replaceable.
+
+--------------------------------
+
+Implementation Notes
+
+Explain why this implementation is better.
+
+--------------------------------
 
 Expected Benefit
-[Specify the architectural or runtime impact, such as reduced bundle size, faster render cycles, lower memory footprint, or improved maintainability/testability.]
 
 Estimated Effort
 [Provide an estimate of effort, e.g., Low (1-2 hours), Medium (half day), High (1-2 days)]
@@ -220,6 +277,20 @@ Estimated Effort
 
 ### Performance Improvements
 [Provide a list of runtime performance optimizations. For React, detail React.memo, useMemo, useCallback usage, virtualized lists, or chunked rendering. For general code, detail algorithmic improvements, memory footprint reduction, or async optimization.]
+
+--------------------------------
+
+### Complete Refactored File
+
+Merge ALL improvements into one final version.
+
+Generate the COMPLETE updated file.
+
+The generated file should compile successfully.
+
+Return ONLY code.
+
+Do NOT explain anything.
 
 --------------------------------
 
@@ -263,7 +334,7 @@ Per-file findings:
         # smaller context and concise response budget greatly reduce latency on
         # a local 26B model without truncating the input.
         self.num_ctx = 8192
-        self.num_predict = 384
+        self.num_predict = 2048
         self.keep_alive = "15m"
         self._response_cache: Dict[tuple[str, str], str] = {}
         

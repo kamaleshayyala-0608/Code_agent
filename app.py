@@ -8,7 +8,8 @@ from generators.cicd_generator import (
     parse_markdown_file_blocks,
     parse_json_from_llm,
     build_doc_markdown,
-    create_zip_from_dict
+    create_zip_from_dict,
+    extract_complete_refactored_file
 )
 
 # Initialize session state cache and persistence variables
@@ -117,7 +118,7 @@ FAST_MODE = True
 # many 26B requests at once increases queueing and VRAM pressure instead of
 # reducing total report time.
 MAX_CONCURRENT_MODEL_REQUESTS = 1
-GLOBAL_COMPILER_TOKENS = 1200
+GLOBAL_COMPILER_TOKENS = 4096
 
 def _split_into_chunks(text: str, chunk_size: int = CHUNK_CHAR_LIMIT) -> list:
     """
@@ -580,7 +581,13 @@ Problem
 
 Evidence
 
+Current Code
+
 Recommendation
+
+Improved Code
+
+Implementation Notes
 
 Expected Benefit
 
@@ -609,6 +616,9 @@ Repeat for every finding."""
                                     raw_output = future.result()
                                     raw_outputs[fname] = raw_output
                                     refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
+                                    refactored_code = extract_complete_refactored_file(raw_output)
+                                    if refactored_code:
+                                        refactor_results[f"REFACTORED_CODE/{fname}"] = refactored_code
                                 except Exception as e:
                                     st.error(f"Failed to refactor {fname}: {e}")
                                     refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
@@ -622,6 +632,9 @@ Repeat for every finding."""
                                 st.write("✓ Analysis completed.")
                                 raw_outputs[fname] = raw_output
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
+                                refactored_code = extract_complete_refactored_file(raw_output)
+                                if refactored_code:
+                                    refactor_results[f"REFACTORED_CODE/{fname}"] = refactored_code
                             except Exception as e:
                                 st.error(f"Failed to refactor {fname}: {e}")
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
@@ -677,10 +690,15 @@ Repeat for every finding."""
                     "COMMON_FUNCTIONS.md",
                     "COMMON_PATTERNS.md",
                     "CUSTOM_HOOKS.md",
-                    "MIGRATION_PLAN.md"
+                    "MIGRATION_PLAN.md",
+                    "REFACTORED_FILES.md"
                 }
                 for key in list(refactor_results.keys()):
-                    if not key.startswith("FILE_RECOMMENDATIONS/") and key not in allowed_keys:
+                    if (
+                        not key.startswith("FILE_RECOMMENDATIONS/")
+                        and not key.startswith("REFACTORED_CODE/")
+                        and key not in allowed_keys
+                    ):
                         refactor_results.pop(key, None)
 
                 _render_task_controls("Refactor", refactor_results, active_code_payload)

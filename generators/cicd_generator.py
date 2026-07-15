@@ -171,3 +171,26 @@ def create_zip_from_dict(files_dict: dict) -> bytes:
             zip_file.writestr(clean_path, content)
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
+
+def extract_complete_refactored_file(text: str) -> str:
+    """
+    Extracts the complete refactored file content from the refactoring findings.
+    Looks for code blocks under the '### Complete Refactored File' section.
+    """
+    match = re.search(r"###\s*Complete\s*Refactored\s*File\s*([\s\S]*)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    
+    content = match.group(1).strip()
+    
+    # Remove any trailing section (e.g. '### Refactoring Priority')
+    divider_match = re.search(r"^(?:--------------------------------|###\s*\w+)", content, re.MULTILINE)
+    if divider_match:
+        content = content[:divider_match.start()].strip()
+        
+    code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", content)
+    if code_match:
+        return code_match.group(1).strip()
+    
+    return content
+
