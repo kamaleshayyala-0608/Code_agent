@@ -52,6 +52,42 @@ def parse_stage1_output(text: str) -> list:
         findings.append(fields)
     return findings
 
+def parse_stage2_output(text: str) -> dict:
+    blocks = re.split(r"###\s*Finding\s*\d+", text, flags=re.IGNORECASE)
+    findings_improvements = {}
+    
+    for idx, block in enumerate(blocks[1:]):
+        block = block.strip()
+        if not block:
+            continue
+        
+        improved_code = ""
+        impl_notes = ""
+        
+        imp_match = re.search(r"Improved\s*Code\s*([\s\S]*?)(?:Implementation\s*Notes|$)", block, re.IGNORECASE)
+        notes_match = re.search(r"Implementation\s*Notes\s*([\s\S]*)", block, re.IGNORECASE)
+        
+        if imp_match:
+            improved_code_raw = imp_match.group(1).strip()
+            code_block_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", improved_code_raw)
+            if code_block_match:
+                improved_code = code_block_match.group(1).strip()
+            else:
+                improved_code = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\n", "", improved_code_raw)
+                improved_code = re.sub(r"\n```$", "", improved_code).strip()
+        if notes_match:
+            impl_notes = notes_match.group(1).strip()
+            impl_notes = re.sub(r"^[-\s]+", "", impl_notes).strip()
+            divider_match = re.search(r"^(?:--------------------------------|###\s*\w+)", impl_notes, re.MULTILINE)
+            if divider_match:
+                impl_notes = impl_notes[:divider_match.start()].strip()
+        
+        findings_improvements[idx + 1] = {
+            "Improved Code": improved_code,
+            "Implementation Notes": impl_notes
+        }
+    return findings_improvements
+
 
 class LocalCodeAgentEngine:
     """
@@ -390,21 +426,14 @@ Priority
 [Repeat the Findings block above for each additional finding, separating them with the 32-hyphen divider: --------------------------------]
 """
 
-    REFACTOR_FINDING_STAGE2_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+    REFACTOR_FINDINGS_STAGE2_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
 You are refactoring the file: {file_name}
 
-We have identified a refactoring opportunity:
-Category: {category}
-Problem: {problem}
-Recommendation: {recommendation}
+Here is the list of findings/recommendations identified for this file:
+{findings_summary}
 
-Here is the Current Code that needs refactoring:
-```
-{current_code}
-```
-
-Generate the following sections for this finding:
-1. Improved Code: Generate the COMPLETE improved implementation.
+For each finding, generate the following two sections:
+1. Improved Code: Generate the COMPLETE improved implementation of the Current Code.
 Rules:
 - Preserve functionality.
 - Do not use pseudo code.
@@ -416,8 +445,9 @@ Rules:
 
 2. Implementation Notes: Explain why this implementation is better.
 
-Format your response EXACTLY as follows:
+Format your response EXACTLY as follows for each finding:
 
+### Finding <N>
 Improved Code
 ```[language]
 [Complete improved code]
@@ -695,7 +725,7 @@ Follow the rules in this REFACTORING_SPEC.md:
 """
         stage1_prompt += self.REFACTOR_FILE_STAGE1_PROMPT.format(file_name=file_name)
         
-        stage1_output = self._generate_local_response(stage1_prompt, file_content)
+        stage1_output = self._generate_local_response(stage1_prompt, file_content, num_predict=2048)
         
         if "No refactoring required" in stage1_output or not stage1_output.strip():
             report = f"## File\n{file_name}\n\nNo refactoring required."
@@ -706,10 +736,31 @@ Follow the rules in this REFACTORING_SPEC.md:
         # Parse findings from Stage 1
         findings = parse_stage1_output(stage1_output)
         if not findings:
-            single_prompt = self.REFACTOR_FILE_PROMPT.format(file_name=file_name)
-            return self._generate_local_response(single_prompt, file_content)
+            return stage1_output
 
-        # 2. Run Stage 2 for each finding to get Improved Code and Implementation Notes
+        # 2. Run Stage 2 to get Improved Code and Implementation Notes for all findings in one call
+        findings_summary_list = []
+        for idx, finding in enumerate(findings):
+            findings_summary_list.append(
+                f"### Finding {idx+1}\n"
+                f"Category: {finding.get('Category')}\n"
+                f"Problem: {finding.get('Problem')}\n"
+                f"Current Code:\n{finding.get('Current Code')}\n"
+                f"Recommendation: {finding.get('Recommendation')}\n"
+            )
+        findings_summary = "\n\n".join(findings_summary_list)
+        
+        stage2_prompt = ""
+        if prev_spec:
+            stage2_prompt = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
+        stage2_prompt += self.REFACTOR_FINDINGS_STAGE2_PROMPT.format(
+            file_name=file_name,
+            findings_summary=findings_summary
+        )
+        
+        stage2_output = self._generate_local_response(stage2_prompt, file_content, num_predict=4096)
+        improvements_map = parse_stage2_output(stage2_output)
+        
         assembled_findings = []
         improvements_summary = []
         
@@ -729,44 +780,10 @@ Follow the rules in this REFACTORING_SPEC.md:
                 if code_match:
                     clean_current_code = code_match.group(1).strip()
             
-            if not clean_current_code or not recommendation:
-                improved_code = ""
-                impl_notes = ""
-            else:
-                stage2_prompt = ""
-                if prev_spec:
-                    stage2_prompt = f"""You are a Principal Software Engineer.
-Follow the rules in this REFACTORING_SPEC.md:
-{prev_spec}
-
-"""
-                stage2_prompt += self.REFACTOR_FINDING_STAGE2_PROMPT.format(
-                    file_name=file_name,
-                    category=category,
-                    problem=problem,
-                    recommendation=recommendation,
-                    current_code=clean_current_code
-                )
-                stage2_output = self._generate_local_response(stage2_prompt, file_content)
-                
-                improved_code = ""
-                impl_notes = ""
-                
-                imp_match = re.search(r"Improved\s*Code\s*([\s\S]*?)(?:Implementation\s*Notes|$)", stage2_output, re.IGNORECASE)
-                notes_match = re.search(r"Implementation\s*Notes\s*([\s\S]*)", stage2_output, re.IGNORECASE)
-                
-                if imp_match:
-                    improved_code_raw = imp_match.group(1).strip()
-                    code_block_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", improved_code_raw)
-                    if code_block_match:
-                        improved_code = code_block_match.group(1).strip()
-                    else:
-                        improved_code = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\n", "", improved_code_raw)
-                        improved_code = re.sub(r"\n```$", "", improved_code).strip()
-                if notes_match:
-                    impl_notes = notes_match.group(1).strip()
-                    impl_notes = re.sub(r"^[-\s]+", "", impl_notes).strip()
-                    
+            improvements = improvements_map.get(idx + 1, {})
+            improved_code = improvements.get("Improved Code", "")
+            impl_notes = improvements.get("Implementation Notes", "")
+            
             # Assemble findings
             finding_md = f"""### Finding {idx+1}
 
@@ -843,7 +860,7 @@ Priority
             original_content=file_content,
             improvements=improvements_summary_str
         )
-        raw_out = self._generate_local_response(assembly_prompt, file_content)
+        raw_out = self._generate_local_response(assembly_prompt, file_content, num_predict=4096)
         
         has_header = False
         for header in ["Complete Refactored File", "Final Refactored Code", "Refactored File", "Merged Code"]:
@@ -865,7 +882,7 @@ Improvements:
 CRITICAL INSTRUCTION:
 Return your response under the header '### Complete Refactored File' and include the complete code.
 """
-            raw_out = self._generate_local_response(retry_prompt, file_content)
+            raw_out = self._generate_local_response(retry_prompt, file_content, num_predict=4096)
             
         refactored_code = extract_complete_refactored_file(raw_out)
         if not refactored_code:

@@ -429,16 +429,98 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                     
     elif task_name == "Refactor":
         # task_data is a dict of {filepath: content}
+        has_compiled_package = "REFACTORING_GUIDE.md" in task_data
+        
         if task_data:
-            zip_bytes = create_zip_from_dict(task_data)
-            st.download_button(
-                label="📥 Download Refactoring Package (ZIP)",
-                data=zip_bytes,
-                file_name="refactoring_suggestions.zip",
-                mime="application/zip",
-                use_container_width=True,
-                key="download_refactor"
-            )
+            if has_compiled_package:
+                zip_bytes = create_zip_from_dict(task_data)
+                st.download_button(
+                    label="📥 Download Refactoring Package (ZIP)",
+                    data=zip_bytes,
+                    file_name="refactoring_suggestions.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="download_refactor"
+                )
+            else:
+                if st.button("📦 Prepare Refactoring Package for Download (Compiles Guides)", use_container_width=True):
+                    with st.spinner("Compiling project-level refactoring specifications and roadmaps..."):
+                        # Reconstruct the file-level findings summary
+                        raw_outputs = {}
+                        for file_key, content in task_data.items():
+                            if file_key.startswith("FILE_RECOMMENDATIONS/"):
+                                fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
+                                raw_outputs[fname] = content
+                                
+                        refactor_metadata = "\n\n".join(
+                            f"### Findings for {fname}\n{raw_output}"
+                            for fname, raw_output in raw_outputs.items()
+                        )
+                        
+                        # Generate the 6 guides
+                        global_prompts = [
+                            ("REFACTORING_GUIDE.md", engine.GLOBAL_REFACTORING_GUIDE_PROMPT),
+                            ("COMMON_FUNCTIONS.md", engine.GLOBAL_COMMON_FUNCTIONS_PROMPT),
+                            ("CUSTOM_HOOKS.md", engine.GLOBAL_CUSTOM_HOOKS_PROMPT),
+                            ("COMMON_PATTERNS.md", engine.GLOBAL_COMMON_PATTERNS_PROMPT),
+                            ("MIGRATION_PLAN.md", engine.GLOBAL_MIGRATION_PLAN_PROMPT),
+                            ("REFACTORED_FILES.md", engine.GLOBAL_REFACTORED_FILES_PROMPT)
+                        ]
+                        for doc_name, prompt_template in global_prompts:
+                            try:
+                                prompt = prompt_template.format(metadata_summary=refactor_metadata)
+                                raw_out = engine._generate_local_response(prompt, refactor_metadata, num_predict=GLOBAL_COMPILER_TOKENS)
+                                parsed_files = parse_markdown_file_blocks(raw_out)
+                                if parsed_files:
+                                    task_data.update(parsed_files)
+                                else:
+                                    clean_out = raw_out
+                                    if clean_out.strip().startswith("### File:"):
+                                        parts = clean_out.split("\n", 1)
+                                        if len(parts) > 1:
+                                            clean_out = parts[1]
+                                    task_data[doc_name] = clean_out.strip()
+                            except Exception as e:
+                                st.error(f"Error compiling {doc_name}: {str(e)}")
+                                
+                        # Generate REFACTORING_SPEC.md
+                        try:
+                            spec_prompt = engine.REFACTORING_SPEC_PROMPT.format(metadata_summary=refactor_metadata)
+                            raw_spec_output = engine._generate_local_response(spec_prompt, refactor_metadata, num_predict=GLOBAL_COMPILER_TOKENS)
+                            spec_files = parse_markdown_file_blocks(raw_spec_output)
+                            if "REFACTORING_SPEC.md" in spec_files:
+                                task_data["REFACTORING_SPEC.md"] = spec_files["REFACTORING_SPEC.md"]
+                            else:
+                                clean_spec = raw_spec_output
+                                if clean_spec.strip().startswith("### File:"):
+                                    parts = clean_spec.split("\n", 1)
+                                    if len(parts) > 1:
+                                        clean_spec = parts[1]
+                                task_data["REFACTORING_SPEC.md"] = clean_spec
+                        except Exception as e:
+                            st.error(f"Error generating specification: {str(e)}")
+                        
+                        # Filter keys to exactly match the requested ZIP structure
+                        allowed_keys = {
+                            "REFACTORING_GUIDE.md",
+                            "REFACTORING_SPEC.md",
+                            "COMMON_FUNCTIONS.md",
+                            "COMMON_PATTERNS.md",
+                            "CUSTOM_HOOKS.md",
+                            "MIGRATION_PLAN.md",
+                            "REFACTORED_FILES.md",
+                            "SUMMARY.md"
+                        }
+                        for key in list(task_data.keys()):
+                            if (
+                                not key.startswith("FILE_RECOMMENDATIONS/")
+                                and not key.startswith("REFACTORED_CODE/")
+                                and key not in allowed_keys
+                            ):
+                                task_data.pop(key, None)
+                                
+                        st.success("Refactoring package prepared successfully!")
+                        st.rerun()
         
         # Render project-level guide first
         if "REFACTORING_GUIDE.md" in task_data:
@@ -664,9 +746,6 @@ Repeat for every finding."""
                                     raw_output = future.result()
                                     raw_outputs[fname] = raw_output
                                     refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
-                                    refactored_code = extract_complete_refactored_file(raw_output)
-                                    if refactored_code:
-                                        refactor_results[f"REFACTORED_CODE/{fname}"] = refactored_code
                                 except Exception as e:
                                     st.error(f"Failed to refactor {fname}: {e}")
                                     refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
@@ -679,74 +758,9 @@ Repeat for every finding."""
                                 st.write("✓ Analysis completed.")
                                 raw_outputs[fname] = raw_output
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
-                                refactored_code = extract_complete_refactored_file(raw_output)
-                                if refactored_code:
-                                    refactor_results[f"REFACTORED_CODE/{fname}"] = refactored_code
                             except Exception as e:
                                 st.error(f"Failed to refactor {fname}: {e}")
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
-
-                # Compile the file-level findings into a project consulting package.
-                refactor_metadata = "\n\n".join(
-                    f"### Findings for {fname}\n{raw_output}"
-                    for fname, raw_output in raw_outputs.items()
-                )
-                global_prompts = [
-                    ("REFACTORING_GUIDE.md", engine.GLOBAL_REFACTORING_GUIDE_PROMPT),
-                    ("COMMON_FUNCTIONS.md", engine.GLOBAL_COMMON_FUNCTIONS_PROMPT),
-                    ("CUSTOM_HOOKS.md", engine.GLOBAL_CUSTOM_HOOKS_PROMPT),
-                    ("COMMON_PATTERNS.md", engine.GLOBAL_COMMON_PATTERNS_PROMPT),
-                    ("MIGRATION_PLAN.md", engine.GLOBAL_MIGRATION_PLAN_PROMPT),
-                    ("REFACTORED_FILES.md", engine.GLOBAL_REFACTORED_FILES_PROMPT)
-                ]
-                for doc_name, prompt_template in global_prompts:
-                    st.caption(f"Compiling project-level {doc_name}...")
-                    with st.container(border=True):
-                        try:
-                            prompt = prompt_template.format(metadata_summary=refactor_metadata)
-                            stream = engine.generate_stream_response(
-                                prompt,
-                                f"Generate the requested {doc_name} file.",
-                                num_predict=GLOBAL_COMPILER_TOKENS,
-                            )
-                            raw_out = st.write_stream(stream) or ""
-                            parsed_files = parse_markdown_file_blocks(raw_out)
-                            if parsed_files:
-                                refactor_results.update(parsed_files)
-                            else:
-                                clean_out = raw_out
-                                if clean_out.strip().startswith("### File:"):
-                                    parts = clean_out.split("\n", 1)
-                                    if len(parts) > 1:
-                                        clean_out = parts[1]
-                                refactor_results[doc_name] = clean_out.strip()
-                        except Exception as e:
-                            st.error(f"Error compiling {doc_name}: {str(e)}")
-
-                # Additional LLM call to generate REFACTORING_SPEC.md
-                st.caption("Generating project-wide refactoring specification...")
-                with st.container(border=True):
-                    try:
-                        spec_prompt = engine.REFACTORING_SPEC_PROMPT.format(metadata_summary=refactor_metadata)
-                        spec_stream = engine.generate_stream_response(
-                            spec_prompt,
-                            "Generate the REFACTORING_SPEC.md document based on the per-file findings.",
-                            num_predict=GLOBAL_COMPILER_TOKENS,
-                        )
-                        raw_spec_output = st.write_stream(spec_stream) or ""
-                        spec_files = parse_markdown_file_blocks(raw_spec_output)
-                        if "REFACTORING_SPEC.md" in spec_files:
-                            refactor_results["REFACTORING_SPEC.md"] = spec_files["REFACTORING_SPEC.md"]
-                        else:
-                            # Heuristic fallback if header missing
-                            clean_spec = raw_spec_output
-                            if clean_spec.strip().startswith("### File:"):
-                                parts = clean_spec.split("\n", 1)
-                                if len(parts) > 1:
-                                    clean_spec = parts[1]
-                            refactor_results["REFACTORING_SPEC.md"] = clean_spec
-                    except Exception as e:
-                        st.error(f"Error during specification generation: {str(e)}")
 
                 # Programmatically build SUMMARY.md
                 summary_lines = []
