@@ -572,25 +572,6 @@ followed by the markdown content, with no surrounding code fences or blocks. Do 
 Per-file findings:
 {metadata_summary}"""
 
-    REFACTORING_SPEC_PROMPT = """You are a Principal Software Architect and Lead Quality Engineer.
-Generate a project-wide refactoring specification named REFACTORING_SPEC.md based on the provided per-file findings. This specification will act as the engineering standards document for all code modifications, ensuring all developers on the team adhere to identical conventions.
-
-Your document must cover the following sections in detail:
-1. React & Component Conventions (e.g., functional components, proper hooks placement, prop typing).
-2. Hook & Side-Effect Conventions (e.g., custom hooks vs inline effects, dependency array strictness, cleanup guarantees).
-3. State Management Rules (e.g., local state vs global context, avoiding derived state in state variables, state normalization).
-4. Runtime & Rendering Performance Rules (e.g., when to use useMemo/useCallback/React.memo, virtualization criteria, avoiding inline objects).
-5. Folder & Module Structure Rules (e.g., feature-based vs layer-based layout, strict import boundaries, forbidden circular dependencies).
-6. Naming & Case Conventions (e.g., components, files, hooks, utils, variables, types/interfaces).
-7. API & Integration Patterns (e.g., unified fetch wrappers, request/response interceptors, strict type definitions for all payloads).
-8. Data Transformation & Validation Rules (e.g., parsing/validation at system boundaries, decoupling raw API models from UI models).
-
-You MUST start your response exactly with the header:
-### File: REFACTORING_SPEC.md
-followed by the markdown content, with no surrounding code fences or formatting characters on the header line.
-
-Per-file findings:
-{metadata_summary}"""
 
 
     @staticmethod
@@ -617,6 +598,20 @@ Per-file findings:
             ollama.list()
         except Exception as e:
             raise ConnectionError(f"Failed to connect to local Ollama daemon: {str(e)}")
+
+        # Load static refactoring specification
+        self.spec_rules = ""
+        try:
+            if os.path.exists("rules/refactoring_spec.md"):
+                with open("rules/refactoring_spec.md", "r", encoding="utf-8") as f:
+                    self.spec_rules = f.read()
+            else:
+                spec_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules", "refactoring_spec.md")
+                if os.path.exists(spec_path):
+                    with open(spec_path, "r", encoding="utf-8") as f:
+                        self.spec_rules = f.read()
+        except Exception:
+            pass
 
     def generate_stream_response(self, system_instruction: str, user_code: str, num_predict: int | None = None) -> Generator[str, None, None]:
         """
@@ -709,21 +704,19 @@ Per-file findings:
 
 
     def refactor_file(self, file_name: str, file_content: str) -> str:
-        return self.refactor_file_two_stage(file_name, file_content, generate_complete_file=False)
+        return self.refactor_file_two_stage(file_name, file_content, self.spec_rules, generate_complete_file=False)
 
-    def refactor_file_two_stage(self, file_name: str, file_content: str, prev_spec: str = None, generate_complete_file: bool = False) -> str:
+    def refactor_file_two_stage(self, file_name: str, file_content: str, spec_rules: str, generate_complete_file: bool = False) -> str:
         # Import dynamically to avoid circular import issues
         from generators.cicd_generator import extract_complete_refactored_file
         
         # 1. Run Stage 1 to find recommendations
-        stage1_prompt = ""
-        if prev_spec:
-            stage1_prompt = f"""You are a Principal Software Engineer.
-Follow the rules in this REFACTORING_SPEC.md:
-{prev_spec}
+        stage1_formatted = self.REFACTOR_FILE_STAGE1_PROMPT.format(file_name=file_name)
+        stage1_prompt = f"""Apply ALL rules below.
 
-"""
-        stage1_prompt += self.REFACTOR_FILE_STAGE1_PROMPT.format(file_name=file_name)
+{spec_rules}
+
+{stage1_formatted}"""
         
         stage1_output = self._generate_local_response(stage1_prompt, file_content, num_predict=2048)
         
@@ -750,13 +743,15 @@ Follow the rules in this REFACTORING_SPEC.md:
             )
         findings_summary = "\n\n".join(findings_summary_list)
         
-        stage2_prompt = ""
-        if prev_spec:
-            stage2_prompt = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
-        stage2_prompt += self.REFACTOR_FINDINGS_STAGE2_PROMPT.format(
+        stage2_formatted = self.REFACTOR_FINDINGS_STAGE2_PROMPT.format(
             file_name=file_name,
             findings_summary=findings_summary
         )
+        stage2_prompt = f"""Apply ALL rules below.
+
+{spec_rules}
+
+{stage2_formatted}"""
         
         stage2_output = self._generate_local_response(stage2_prompt, file_content, num_predict=4096)
         improvements_map = parse_stage2_output(stage2_output)
@@ -845,21 +840,23 @@ Priority
         # 3. Assemble the final complete refactored file only if requested
         if generate_complete_file:
             improvements_summary_str = "\n".join(improvements_summary)
-            refactored_code = self._run_assembly(file_name, file_content, improvements_summary_str, prev_spec)
+            refactored_code = self._run_assembly(file_name, file_content, improvements_summary_str, spec_rules)
             final_report.append("\n\n--------------------------------\n\n### Complete Refactored File\n")
             final_report.append(f"```\n{refactored_code}\n```")
         
         return "\n".join(final_report)
 
-    def _run_assembly(self, file_name: str, file_content: str, improvements_summary_str: str, prev_spec: str = None) -> str:
+    def _run_assembly(self, file_name: str, file_content: str, improvements_summary_str: str, spec_rules: str) -> str:
         from generators.cicd_generator import extract_complete_refactored_file
-        prefix = ""
-        if prev_spec:
-            prefix = f"Follow the rules in this REFACTORING_SPEC.md:\n{prev_spec}\n\n"
-        assembly_prompt = prefix + self.REFACTOR_FILE_ASSEMBLE_PROMPT.format(
+        assembly_formatted = self.REFACTOR_FILE_ASSEMBLE_PROMPT.format(
             original_content=file_content,
             improvements=improvements_summary_str
         )
+        assembly_prompt = f"""Apply ALL rules below.
+
+{spec_rules}
+
+{assembly_formatted}"""
         raw_out = self._generate_local_response(assembly_prompt, file_content, num_predict=4096)
         
         has_header = False
@@ -893,7 +890,7 @@ Return your response under the header '### Complete Refactored File' and include
                 refactored_code = raw_out.strip()
         return refactored_code
 
-    def assemble_refactored_file(self, file_name: str, file_content: str, findings_text: str, prev_spec: str = None) -> str:
+    def assemble_refactored_file(self, file_name: str, file_content: str, findings_text: str, spec_rules: str) -> str:
         findings = parse_stage1_output(findings_text)
         improvements_summary = []
         for idx, finding in enumerate(findings):
@@ -915,7 +912,7 @@ Return your response under the header '### Complete Refactored File' and include
             improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{clean_improved_code}\n")
             
         improvements_summary_str = "\n".join(improvements_summary)
-        return self._run_assembly(file_name, file_content, improvements_summary_str, prev_spec)
+        return self._run_assembly(file_name, file_content, improvements_summary_str, spec_rules)
 
     @lru_cache(maxsize=10)
     def scan_local_folder(self, folder_path: str) -> str:

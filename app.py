@@ -483,22 +483,8 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                             except Exception as e:
                                 st.error(f"Error compiling {doc_name}: {str(e)}")
                                 
-                        # Generate REFACTORING_SPEC.md
-                        try:
-                            spec_prompt = engine.REFACTORING_SPEC_PROMPT.format(metadata_summary=refactor_metadata)
-                            raw_spec_output = engine._generate_local_response(spec_prompt, refactor_metadata, num_predict=GLOBAL_COMPILER_TOKENS)
-                            spec_files = parse_markdown_file_blocks(raw_spec_output)
-                            if "REFACTORING_SPEC.md" in spec_files:
-                                task_data["REFACTORING_SPEC.md"] = spec_files["REFACTORING_SPEC.md"]
-                            else:
-                                clean_spec = raw_spec_output
-                                if clean_spec.strip().startswith("### File:"):
-                                    parts = clean_spec.split("\n", 1)
-                                    if len(parts) > 1:
-                                        clean_spec = parts[1]
-                                task_data["REFACTORING_SPEC.md"] = clean_spec
-                        except Exception as e:
-                            st.error(f"Error generating specification: {str(e)}")
+                        # Use static specification
+                        task_data["REFACTORING_SPEC.md"] = engine.spec_rules
                         
                         # Filter keys to exactly match the requested ZIP structure
                         allowed_keys = {
@@ -560,16 +546,10 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                         original_content = original_files.get(fname, "")
                         
                         if original_content:
-                            prev_spec = None
-                            if "pipeline_results" in st.session_state and isinstance(st.session_state.pipeline_results, dict):
-                                prev_refactor = st.session_state.pipeline_results.get("Refactor")
-                                if isinstance(prev_refactor, dict):
-                                    prev_spec = prev_refactor.get("REFACTORING_SPEC.md")
-                                    
                             findings_text = task_data[file_key]
                             
                             try:
-                                complete_code = engine.assemble_refactored_file(fname, original_content, findings_text, prev_spec=prev_spec)
+                                complete_code = engine.assemble_refactored_file(fname, original_content, findings_text, spec_rules=engine.spec_rules)
                                 task_data[refactored_code_key] = complete_code
                                 
                                 # Append Complete Refactored File code block to suggestions report
@@ -678,58 +658,6 @@ with col2:
             if not files_to_process:
                 st.warning("No files found to refactor.")
             else:
-                # Check if a previous REFACTORING_SPEC.md exists in session state from a prior run
-                prev_spec = None
-                if "pipeline_results" in st.session_state and isinstance(st.session_state.pipeline_results, dict):
-                    prev_refactor = st.session_state.pipeline_results.get("Refactor")
-                    if isinstance(prev_refactor, dict):
-                        prev_spec = prev_refactor.get("REFACTORING_SPEC.md")
-
-                def get_refactor_prompt(fname: str) -> str:
-                    if prev_spec:
-                        return f"""You are a Principal React/TypeScript Software Engineer.
-
-Follow REFACTORING_SPEC.md.
-
-Refactor this file using only those engineering rules.
-
-REFACTORING_SPEC.md:
-{prev_spec}
-
-File Name:
-{fname}
-
-Format:
-
-## File
-{fname}
-
-### Finding 1
-
-Category
-
-Problem
-
-Evidence
-
-Current Code
-
-Recommendation
-
-Improved Code
-
-Implementation Notes
-
-Expected Benefit
-
-Estimated Effort
-
---------------------------------
-
-Repeat for every finding."""
-                    else:
-                        return engine.REFACTOR_FILE_PROMPT.format(file_name=fname)
-
                 raw_outputs = {}
                 if MAX_CONCURRENT_MODEL_REQUESTS > 1:
                     with st.spinner("Refactoring files in parallel..."):
@@ -737,7 +665,7 @@ Repeat for every finding."""
                         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
-                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, prev_spec, False)
+                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, engine.spec_rules, False)
                                 future_to_file[future] = fname
                                 
                             for future in concurrent.futures.as_completed(future_to_file):
@@ -754,7 +682,7 @@ Repeat for every finding."""
                         st.caption(f"Refactoring `{fname}`...")
                         with st.container(border=True):
                             try:
-                                raw_output = engine.refactor_file_two_stage(fname, fcontent, prev_spec, False)
+                                raw_output = engine.refactor_file_two_stage(fname, fcontent, engine.spec_rules, False)
                                 st.write("✓ Analysis completed.")
                                 raw_outputs[fname] = raw_output
                                 refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
