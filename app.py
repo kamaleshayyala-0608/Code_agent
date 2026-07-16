@@ -9,8 +9,7 @@ from generators.cicd_generator import (
     parse_markdown_file_blocks,
     parse_json_from_llm,
     build_doc_markdown,
-    create_zip_from_dict,
-    extract_complete_refactored_file
+    create_zip_from_dict
 )
 
 # Initialize session state cache and persistence variables
@@ -428,143 +427,29 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                     st.markdown("---")
                     
     elif task_name == "Refactor":
-        # task_data is a dict of {filepath: content}
-        has_compiled_package = "REFACTORING_GUIDE.md" in task_data
-        
         if task_data:
-            if has_compiled_package:
-                zip_bytes = create_zip_from_dict(task_data)
-                st.download_button(
-                    label="📥 Download Refactoring Package (ZIP)",
-                    data=zip_bytes,
-                    file_name="refactoring_suggestions.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    key="download_refactor"
-                )
-            else:
-                if st.button("📦 Prepare Refactoring Package for Download (Compiles Guides)", use_container_width=True):
-                    with st.spinner("Compiling project-level refactoring specifications and roadmaps..."):
-                        # Reconstruct the file-level findings summary
-                        raw_outputs = {}
-                        for file_key, content in task_data.items():
-                            if file_key.startswith("FILE_RECOMMENDATIONS/"):
-                                fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
-                                raw_outputs[fname] = content
-                                
-                        refactor_metadata = "\n\n".join(
-                            f"### Findings for {fname}\n{raw_output}"
-                            for fname, raw_output in raw_outputs.items()
-                        )
-                        
-                        # Generate the 6 guides
-                        global_prompts = [
-                            ("REFACTORING_GUIDE.md", engine.GLOBAL_REFACTORING_GUIDE_PROMPT),
-                            ("COMMON_FUNCTIONS.md", engine.GLOBAL_COMMON_FUNCTIONS_PROMPT),
-                            ("CUSTOM_HOOKS.md", engine.GLOBAL_CUSTOM_HOOKS_PROMPT),
-                            ("COMMON_PATTERNS.md", engine.GLOBAL_COMMON_PATTERNS_PROMPT),
-                            ("MIGRATION_PLAN.md", engine.GLOBAL_MIGRATION_PLAN_PROMPT),
-                            ("REFACTORED_FILES.md", engine.GLOBAL_REFACTORED_FILES_PROMPT)
-                        ]
-                        for doc_name, prompt_template in global_prompts:
-                            try:
-                                prompt = prompt_template.format(metadata_summary=refactor_metadata)
-                                raw_out = engine._generate_local_response(prompt, refactor_metadata, num_predict=GLOBAL_COMPILER_TOKENS)
-                                parsed_files = parse_markdown_file_blocks(raw_out)
-                                if parsed_files:
-                                    task_data.update(parsed_files)
-                                else:
-                                    clean_out = raw_out
-                                    if clean_out.strip().startswith("### File:"):
-                                        parts = clean_out.split("\n", 1)
-                                        if len(parts) > 1:
-                                            clean_out = parts[1]
-                                    task_data[doc_name] = clean_out.strip()
-                            except Exception as e:
-                                st.error(f"Error compiling {doc_name}: {str(e)}")
-                                
-                        # Use static specification
-                        task_data["REFACTORING_SPEC.md"] = engine.spec_rules
-                        
-                        # Filter keys to exactly match the requested ZIP structure
-                        allowed_keys = {
-                            "REFACTORING_GUIDE.md",
-                            "REFACTORING_SPEC.md",
-                            "COMMON_FUNCTIONS.md",
-                            "COMMON_PATTERNS.md",
-                            "CUSTOM_HOOKS.md",
-                            "MIGRATION_PLAN.md",
-                            "REFACTORED_FILES.md",
-                            "SUMMARY.md"
-                        }
-                        for key in list(task_data.keys()):
-                            if (
-                                not key.startswith("FILE_RECOMMENDATIONS/")
-                                and not key.startswith("REFACTORED_CODE/")
-                                and key not in allowed_keys
-                            ):
-                                task_data.pop(key, None)
-                                
-                        st.success("Refactoring package prepared successfully!")
-                        st.rerun()
-        
-        # Render project-level guide first
-        if "REFACTORING_GUIDE.md" in task_data:
-            with st.expander("📋 Project Refactoring Guide", expanded=True):
-                st.markdown(task_data["REFACTORING_GUIDE.md"])
-
-        # Render report summary first
-        if "SUMMARY.md" in task_data:
-            with st.expander("📋 Comprehensive Refactoring Report Summary", expanded=True):
-                st.markdown(task_data["SUMMARY.md"])
-                
-        # Render per-file recommendations separately from consulting documents.
-        recommendation_keys = sorted([k for k in task_data.keys() if k.startswith("FILE_RECOMMENDATIONS/")])
-        
-        for file_key in recommendation_keys:
-            fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
-            refactored_code_key = f"REFACTORED_CODE/{fname}"
-            has_complete_file = refactored_code_key in task_data
+            zip_bytes = create_zip_from_dict(task_data)
+            st.download_button(
+                label="📥 Download Refactored Project (ZIP)",
+                data=zip_bytes,
+                file_name="Refactored_Project.zip",
+                mime="application/zip",
+                use_container_width=True,
+                key="download_refactor"
+            )
             
-            with st.container(border=True):
-                st.write(f"📄 **Suggestions for {fname}**")
-                
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    show_suggestions = st.checkbox(f"🔍 View Suggestions", value=True, key=f"show_sug_{fname}")
-                with col_btn2:
-                    generate_btn = st.button(
-                        "📄 Generate Complete Refactored File" if not has_complete_file else "✓ Complete File Generated",
-                        key=f"btn_gen_{fname}",
-                        disabled=has_complete_file,
-                        use_container_width=True
-                    )
-                
-                if generate_btn:
-                    with st.spinner(f"Assembling complete refactored file for {fname}..."):
-                        original_files = _split_payload_into_files(active_code_payload)
-                        original_content = original_files.get(fname, "")
-                        
-                        if original_content:
-                            findings_text = task_data[file_key]
-                            
-                            try:
-                                complete_code = engine.assemble_refactored_file(fname, original_content, findings_text, spec_rules=engine.spec_rules)
-                                task_data[refactored_code_key] = complete_code
-                                
-                                # Append Complete Refactored File code block to suggestions report
-                                updated_report = findings_text + f"\n\n--------------------------------\n\n### Complete Refactored File\n\n```\n{complete_code}\n```"
-                                task_data[file_key] = updated_report
-                                
-                                st.success(f"Successfully generated refactored file for {fname}!")
-                                st.rerun()
-                            except Exception as ex:
-                                st.error(f"Failed to generate complete refactored file: {str(ex)}")
-                        else:
-                            st.error(f"Could not find original file content for {fname}")
-                
-                if show_suggestions:
-                    st.markdown(task_data[file_key])
+            for full_key, content in task_data.items():
+                fname = full_key.replace("Refactored_Project/", "")
+                with st.expander(f"📄 {fname} (Refactored)", expanded=True):
+                    _, ext = os.path.splitext(fname)
+                    lang = ext.replace(".", "")
+                    if lang in ("tsx", "jsx"):
+                        lang = "typescript"
+                    elif lang == "js":
+                        lang = "javascript"
+                    elif lang == "py":
+                        lang = "python"
+                    st.code(content, language=lang)
 
     elif task_name in ("Review", "Analysis"):
         if task_data:
@@ -651,105 +536,41 @@ with col2:
 
         # 2. Run Refactoring Pipeline (File-by-file)
         if do_refactor:
-            st.markdown("### ⚙️ Refactoring Suggestions")
+            st.markdown("### ⚙️ Refactoring Project")
             refactor_results = {}
             pipeline_results["Refactor"] = refactor_results
 
             if not files_to_process:
                 st.warning("No files found to refactor.")
             else:
-                raw_outputs = {}
                 if MAX_CONCURRENT_MODEL_REQUESTS > 1:
                     with st.spinner("Refactoring files in parallel..."):
                         import concurrent.futures
                         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
                             future_to_file = {}
                             for fname, fcontent in files_to_process.items():
-                                future = executor.submit(engine.refactor_file_two_stage, fname, fcontent, engine.spec_rules, False)
+                                future = executor.submit(engine.transform_file, fname, fcontent)
                                 future_to_file[future] = fname
                                 
                             for future in concurrent.futures.as_completed(future_to_file):
                                 fname = future_to_file[future]
                                 try:
-                                    raw_output = future.result()
-                                    raw_outputs[fname] = raw_output
-                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
+                                    transformed_code = future.result()
+                                    refactor_results[f"Refactored_Project/{fname}"] = transformed_code
                                 except Exception as e:
                                     st.error(f"Failed to refactor {fname}: {e}")
-                                    refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
+                                    refactor_results[f"Refactored_Project/{fname}"] = f"Error refactoring {fname}: {str(e)}"
                 else:
                     for fname, fcontent in files_to_process.items():
                         st.caption(f"Refactoring `{fname}`...")
                         with st.container(border=True):
                             try:
-                                raw_output = engine.refactor_file_two_stage(fname, fcontent, engine.spec_rules, False)
-                                st.write("✓ Analysis completed.")
-                                raw_outputs[fname] = raw_output
-                                refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = raw_output
+                                transformed_code = engine.transform_file(fname, fcontent)
+                                st.write("✓ Refactoring completed.")
+                                refactor_results[f"Refactored_Project/{fname}"] = transformed_code
                             except Exception as e:
                                 st.error(f"Failed to refactor {fname}: {e}")
-                                refactor_results[f"FILE_RECOMMENDATIONS/{fname}.md"] = f"Error refactoring {fname}: {str(e)}"
-
-                # Programmatically build SUMMARY.md
-                summary_lines = []
-                summary_lines.append("# Refactoring Summary Report\n")
-                summary_lines.append(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                summary_lines.append("## Files Analyzed and Recommendations\n")
-
-                total_findings = 0
-                critical_findings = 0
-                high_findings = 0
-                medium_findings = 0
-                low_findings = 0
-
-                for file_key, file_content in refactor_results.items():
-                    if file_key.startswith("FILE_RECOMMENDATIONS/"):
-                        fname = file_key.replace("FILE_RECOMMENDATIONS/", "").replace(".md", "")
-                        findings_count = len(re.findall(r"###\s*Finding\s*\d+", file_content, re.IGNORECASE))
-                        total_findings += findings_count
-                        
-                        critical_findings += len(re.findall(r"Priority\s*[\r\n]+Critical", file_content, re.IGNORECASE))
-                        high_findings += len(re.findall(r"Priority\s*[\r\n]+High", file_content, re.IGNORECASE))
-                        medium_findings += len(re.findall(r"Priority\s*[\r\n]+Medium", file_content, re.IGNORECASE))
-                        low_findings += len(re.findall(r"Priority\s*[\r\n]+Low", file_content, re.IGNORECASE))
-                        
-                        has_refactored_code = f"REFACTORED_CODE/{fname}" in refactor_results
-                        code_status = "Generated" if has_refactored_code else "No refactoring required"
-                        summary_lines.append(f"- **{fname}**: {findings_count} finding(s) | Refactored Code: {code_status}")
-
-                summary_lines.append("\n## Findings by Priority\n")
-                summary_lines.append(f"- 🔴 **Critical**: {critical_findings}")
-                summary_lines.append(f"- 🟠 **High**: {high_findings}")
-                summary_lines.append(f"- 🟡 **Medium**: {medium_findings}")
-                summary_lines.append(f"- 🟢 **Low**: {low_findings}")
-                summary_lines.append(f"- **Total Findings**: {total_findings}\n")
-
-                summary_lines.append("## Next Steps\n")
-                summary_lines.append("1. Review `REFACTORING_GUIDE.md` for the roadmap phase details.")
-                summary_lines.append("2. Adhere to coding standards defined in `REFACTORING_SPEC.md`.")
-                summary_lines.append("3. Extract common functions and hooks as specified in `COMMON_FUNCTIONS.md` and `CUSTOM_HOOKS.md`.")
-                summary_lines.append("4. Follow the step-by-step execution in `MIGRATION_PLAN.md`.")
-
-                refactor_results["SUMMARY.md"] = "\n".join(summary_lines)
-
-                # Filter keys to exactly match the requested ZIP structure
-                allowed_keys = {
-                    "REFACTORING_GUIDE.md",
-                    "REFACTORING_SPEC.md",
-                    "COMMON_FUNCTIONS.md",
-                    "COMMON_PATTERNS.md",
-                    "CUSTOM_HOOKS.md",
-                    "MIGRATION_PLAN.md",
-                    "REFACTORED_FILES.md",
-                    "SUMMARY.md"
-                }
-                for key in list(refactor_results.keys()):
-                    if (
-                        not key.startswith("FILE_RECOMMENDATIONS/")
-                        and not key.startswith("REFACTORED_CODE/")
-                        and key not in allowed_keys
-                    ):
-                        refactor_results.pop(key, None)
+                                refactor_results[f"Refactored_Project/{fname}"] = f"Error refactoring {fname}: {str(e)}"
 
                 _render_task_controls("Refactor", refactor_results, active_code_payload)
 

@@ -34,7 +34,7 @@ def get_user_data(username):
     print("\n=================== DOCUMENTATION ===================")
     print(engine.document_file("test.py", test_code))
     print("\n=================== REFACTOR ===================")
-    print(engine.refactor_file("test.py", test_code))
+    print(engine.transform_file("test.py", test_code))
 
 
 if __name__ == "__main__":
