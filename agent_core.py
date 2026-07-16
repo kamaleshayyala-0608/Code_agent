@@ -19,7 +19,86 @@ def clean_refactored_code(text: str) -> str:
     if code_match_lazy:
         return code_match_lazy.group(1).strip()
     return text
+def legacy_parse_stage1_output(text: str) -> list:
+    if "No refactoring required" in text or not text.strip():
+        return []
+    
+    findings_blocks = re.split(r"###\s*Finding\s*\d+", text, flags=re.IGNORECASE)
+    findings = []
+    
+    for block in findings_blocks[1:]:
+        block = block.strip()
+        if not block:
+            continue
+        
+        fields = {
+            "Category": "",
+            "Problem": "",
+            "Evidence": "",
+            "Current Code": "",
+            "Recommendation": "",
+            "Improved Code": "",
+            "Implementation Notes": "",
+            "Expected Benefit": "",
+            "Estimated Effort": "",
+            "Priority": ""
+        }
+        
+        headers = ["Category", "Problem", "Evidence", "Current Code", "Recommendation", "Improved Code", "Implementation Notes", "Expected Benefit", "Estimated Effort", "Priority"]
+        positions = {}
+        for h in headers:
+            match = re.search(r"(?:^|\n)\s*" + re.escape(h) + r"\s*(?:\r?\n|$)", block, re.IGNORECASE)
+            if match:
+                positions[h] = (match.start(), match.end())
+        
+        sorted_headers = sorted(positions.keys(), key=lambda x: positions[x][0])
+        
+        for idx, h in enumerate(sorted_headers):
+            start_idx = positions[h][1]
+            end_idx = positions[sorted_headers[idx+1]][0] if idx + 1 < len(sorted_headers) else len(block)
+            content = block[start_idx:end_idx].strip()
+            content = re.sub(r"^[-=\s]+", "", content)
+            content = re.sub(r"(?:^|\n)\s*-{3,}\s*$", "", content)
+            fields[h] = content.strip()
+            
+        findings.append(fields)
+    return findings
 
+def legacy_parse_stage2_output(text: str) -> dict:
+    blocks = re.split(r"###\s*Finding\s*\d+", text, flags=re.IGNORECASE)
+    findings_improvements = {}
+    
+    for idx, block in enumerate(blocks[1:]):
+        block = block.strip()
+        if not block:
+            continue
+        
+        improved_code = ""
+        impl_notes = ""
+        
+        imp_match = re.search(r"Improved\s*Code\s*([\s\S]*?)(?:Implementation\s*Notes|$)", block, re.IGNORECASE)
+        notes_match = re.search(r"Implementation\s*Notes\s*([\s\S]*)", block, re.IGNORECASE)
+        
+        if imp_match:
+            improved_code_raw = imp_match.group(1).strip()
+            code_block_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", improved_code_raw)
+            if code_block_match:
+                improved_code = code_block_match.group(1).strip()
+            else:
+                improved_code = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\n", "", improved_code_raw)
+                improved_code = re.sub(r"\n```$", "", improved_code).strip()
+        if notes_match:
+            impl_notes = notes_match.group(1).strip()
+            impl_notes = re.sub(r"^[-\s]+", "", impl_notes).strip()
+            divider_match = re.search(r"^(?:--------------------------------|###\s*\w+)", impl_notes, re.MULTILINE)
+            if divider_match:
+                impl_notes = impl_notes[:divider_match.start()].strip()
+        
+        findings_improvements[idx + 1] = {
+            "Improved Code": improved_code,
+            "Implementation Notes": impl_notes
+        }
+    return findings_improvements
 
 
 class LocalCodeAgentEngine:
@@ -130,22 +209,141 @@ Use Markdown prose directly after each file header; do not use code fences. Incl
 
     TRANSFORM_FILE_PROMPT = """You are an Enterprise Code Transformation Engine.
 
-The following Specification is the ONLY source of truth:
+The attached refactoring_spec.md is the ONLY source of truth:
 {specification}
 
-Apply every applicable rule.
+Apply every applicable rule to the attached source code.
+
+Do NOT generate findings.
 
 Do NOT generate recommendations.
 
-Do NOT explain.
+Do NOT generate summaries.
 
-Do NOT summarize.
-
-Do NOT produce reports.
+Do NOT generate markdown.
 
 Preserve behaviour.
 
 Return ONLY the complete refactored source file.
+"""
+
+    LEGACY_REFACTOR_FILE_STAGE1_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+Analyze ONLY the provided file: {file_name}
+
+Your goal is to identify concrete, architecture-aware, high-impact refactoring opportunities that improve maintainability, readability, scalability, and performance while strictly preserving behavior.
+You must perform a deep layer-by-layer engineering analysis across the following dimensions:
+1. Component Structure & Modularization
+2. State & Hook Management
+3. API, Data Ingestion, and Caching
+4. Logic Duplication and Extraction
+5. Rendering Performance & Memoization
+6. Code Quality, Typing, and Robustness
+
+If no improvements exist, explicitly state:
+"No refactoring required."
+
+Otherwise, return your response in Markdown using the EXACT structure below. Ensure you do not omit any of the headers or the horizontal dividers (---), as downstream parsers rely on this specific syntax.
+Do NOT generate Improved Code, Implementation Notes, or the Complete Refactored File. Only identify the findings and recommendations.
+
+## File
+{file_name}
+
+### Finding 1
+
+Category
+[Category Name]
+
+Problem
+[Provide a rigorous, architecture-aware explanation of the code smell, anti-pattern, or performance bottleneck.]
+
+Evidence
+```[language]
+[Paste the specific code snippet(s) from the file demonstrating the problem]
+```
+
+--------------------------------
+
+Current Code
+[Copy ONLY the exact code snippet from the uploaded file that needs refactoring. Do NOT modify it.]
+
+--------------------------------
+
+Recommendation
+[Explain what should be improved.]
+
+--------------------------------
+
+Expected Benefit
+[Describe the expected benefit]
+
+--------------------------------
+
+Estimated Effort
+[Low/Medium/High]
+
+--------------------------------
+
+Priority
+[Critical/High/Medium/Low]
+
+--------------------------------
+
+[Repeat the Findings block above for each additional finding, separating them with the 32-hyphen divider: --------------------------------]
+"""
+
+    LEGACY_REFACTOR_FINDINGS_STAGE2_PROMPT = """You are a Principal Software Engineer and Enterprise Architect.
+You are refactoring the file: {file_name}
+
+Here is the list of findings/recommendations identified for this file:
+{findings_summary}
+
+For each finding, generate the following two sections:
+1. Improved Code: Generate the COMPLETE improved implementation of the Current Code.
+Rules:
+- Preserve functionality.
+- Do not use pseudo code.
+- Do not use comments like "...existing code..."
+- Generate production-ready code.
+- Return the ENTIRE function/class.
+- Include imports if required.
+- The code should be directly replaceable.
+
+2. Implementation Notes: Explain why this implementation is better.
+
+Format your response EXACTLY as follows for each finding:
+
+### Finding <N>
+Improved Code
+```[language]
+[Complete improved code]
+```
+
+--------------------------------
+
+Implementation Notes
+[Explain why this implementation is better]
+"""
+
+    LEGACY_REFACTOR_FILE_ASSEMBLE_PROMPT = """You are a Principal Software Engineer.
+Below is the original file and the list of refactoring improvements that need to be merged.
+Generate the COMPLETE refactored file.
+
+Original File:
+{original_content}
+
+Improvements:
+{improvements}
+
+CRITICAL INSTRUCTION:
+Generate the COMPLETE replacement code.
+Never skip code.
+Never summarize code.
+Never write "...existing code..."
+Return ONLY the complete code.
+
+Always finish with:
+### Complete Refactored File
+Return ONLY the complete code.
 """
 
     VALIDATOR_SYSTEM_PROMPT = """You are an Automated Code Behavior Validator.
@@ -288,18 +486,8 @@ followed by a brief reason.
 
     def transform_file(self, file_name: str, file_content: str) -> str:
         system_instruction = self.TRANSFORM_FILE_PROMPT.format(specification=self.spec_rules)
-        
-        current_content = file_content
-        max_retries = 3
-        
-        for attempt in range(max_retries):
-            refactored_raw = self._generate_local_response(system_instruction, current_content, num_predict=4096)
-            refactored_code = clean_refactored_code(refactored_raw)
-            
-            if self.validate_behavior(file_content, refactored_code):
-                return refactored_code
-            
-        return refactored_code
+        refactored_raw = self._generate_local_response(system_instruction, file_content, num_predict=4096)
+        return clean_refactored_code(refactored_raw)
 
     def validate_behavior(self, original: str, refactored: str) -> bool:
         user_content = f"### Original Code\n```\n{original}\n```\n\n### Refactored Code\n```\n{refactored}\n```"
@@ -310,6 +498,217 @@ followed by a brief reason.
             return False
         except Exception:
             return True
+
+    def legacy_refactor_file(self, file_name: str, file_content: str) -> str:
+        return self.legacy_refactor_file_two_stage(file_name, file_content, self.spec_rules, generate_complete_file=False)
+
+    def legacy_refactor_file_two_stage(self, file_name: str, file_content: str, spec_rules: str, generate_complete_file: bool = False) -> str:
+        # Import dynamically to avoid circular import issues
+        from generators.cicd_generator import extract_complete_refactored_file
+        
+        # 1. Run Stage 1 to find recommendations
+        stage1_formatted = self.LEGACY_REFACTOR_FILE_STAGE1_PROMPT.format(file_name=file_name)
+        stage1_prompt = f"""Apply ALL rules below.
+
+{spec_rules}
+
+{stage1_formatted}"""
+        
+        stage1_output = self._generate_local_response(stage1_prompt, file_content, num_predict=2048)
+        
+        if "No refactoring required" in stage1_output or not stage1_output.strip():
+            report = f"## File\n{file_name}\n\nNo refactoring required."
+            if generate_complete_file:
+                report += f"\n\n### Complete Refactored File\n\n```\n{file_content}\n```"
+            return report
+
+        # Parse findings from Stage 1
+        findings = legacy_parse_stage1_output(stage1_output)
+        if not findings:
+            return stage1_output
+
+        # 2. Run Stage 2 to get Improved Code and Implementation Notes for all findings in one call
+        findings_summary_list = []
+        for idx, finding in enumerate(findings):
+            findings_summary_list.append(
+                f"### Finding {idx+1}\n"
+                f"Category: {finding.get('Category')}\n"
+                f"Problem: {finding.get('Problem')}\n"
+                f"Current Code:\n{finding.get('Current Code')}\n"
+                f"Recommendation: {finding.get('Recommendation')}\n"
+            )
+        findings_summary = "\n\n".join(findings_summary_list)
+        
+        stage2_formatted = self.LEGACY_REFACTOR_FINDINGS_STAGE2_PROMPT.format(
+            file_name=file_name,
+            findings_summary=findings_summary
+        )
+        stage2_prompt = f"""Apply ALL rules below.
+
+{spec_rules}
+
+{stage2_formatted}"""
+        
+        stage2_output = self._generate_local_response(stage2_prompt, file_content, num_predict=4096)
+        improvements_map = legacy_parse_stage2_output(stage2_output)
+        
+        assembled_findings = []
+        improvements_summary = []
+        
+        for idx, finding in enumerate(findings):
+            category = finding.get("Category", "Refactoring Opportunity")
+            problem = finding.get("Problem", "")
+            evidence = finding.get("Evidence", "")
+            current_code = finding.get("Current Code", "")
+            recommendation = finding.get("Recommendation", "")
+            expected_benefit = finding.get("Expected Benefit", "")
+            estimated_effort = finding.get("Estimated Effort", "")
+            priority = finding.get("Priority", "")
+            
+            clean_current_code = current_code
+            if clean_current_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_current_code)
+                if code_match:
+                    clean_current_code = code_match.group(1).strip()
+            
+            improvements = improvements_map.get(idx + 1, {})
+            improved_code = improvements.get("Improved Code", "")
+            impl_notes = improvements.get("Implementation Notes", "")
+            
+            # Assemble findings
+            finding_md = f"""### Finding {idx+1}
+
+Category
+{category}
+
+Problem
+{problem}
+
+Evidence
+{evidence}
+
+--------------------------------
+
+Current Code
+```
+{clean_current_code}
+```
+
+--------------------------------
+
+Recommendation
+{recommendation}
+
+--------------------------------
+
+Improved Code
+```
+{improved_code}
+```
+
+--------------------------------
+
+Implementation Notes
+{impl_notes}
+
+--------------------------------
+
+Expected Benefit
+{expected_benefit}
+
+--------------------------------
+
+Estimated Effort
+{estimated_effort}
+
+--------------------------------
+
+Priority
+{priority}"""
+            assembled_findings.append(finding_md)
+            improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{improved_code}\n")
+
+        # Build final markdown report
+        final_report = []
+        final_report.append(f"## File\n{file_name}\n")
+        final_report.append("\n\n--------------------------------\n\n".join(assembled_findings))
+        
+        # 3. Assemble the final complete refactored file only if requested
+        if generate_complete_file:
+            improvements_summary_str = "\n".join(improvements_summary)
+            refactored_code = self.legacy_run_assembly(file_name, file_content, improvements_summary_str, spec_rules)
+            final_report.append("\n\n--------------------------------\n\n### Complete Refactored File\n")
+            final_report.append(f"```\n{refactored_code}\n```")
+        
+        return "\n".join(final_report)
+
+    def legacy_run_assembly(self, file_name: str, file_content: str, improvements_summary_str: str, spec_rules: str) -> str:
+        from generators.cicd_generator import extract_complete_refactored_file
+        assembly_formatted = self.LEGACY_REFACTOR_FILE_ASSEMBLE_PROMPT.format(
+            original_content=file_content,
+            improvements=improvements_summary_str
+        )
+        assembly_prompt = f"""Apply ALL rules below.
+
+{spec_rules}
+
+{assembly_formatted}"""
+        raw_out = self._generate_local_response(assembly_prompt, file_content, num_predict=4096)
+        
+        has_header = False
+        for header in ["Complete Refactored File", "Final Refactored Code", "Refactored File", "Merged Code"]:
+            if header.lower() in raw_out.lower():
+                has_header = True
+                break
+        
+        if not has_header:
+            retry_prompt = f"""You previously generated a response but did not include the '### Complete Refactored File' section.
+Please generate the COMPLETE refactored file now. Merge all the improvements into the original file.
+Return ONLY the code.
+
+Original File:
+{file_content}
+
+Improvements:
+{improvements_summary_str}
+
+CRITICAL INSTRUCTION:
+Return your response under the header '### Complete Refactored File' and include the complete code.
+"""
+            raw_out = self._generate_local_response(retry_prompt, file_content, num_predict=4096)
+            
+        refactored_code = extract_complete_refactored_file(raw_out)
+        if not refactored_code:
+            code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", raw_out)
+            if code_match:
+                refactored_code = code_match.group(1).strip()
+            else:
+                refactored_code = raw_out.strip()
+        return refactored_code
+
+    def legacy_assemble_refactored_file(self, file_name: str, file_content: str, findings_text: str, spec_rules: str) -> str:
+        findings = legacy_parse_stage1_output(findings_text)
+        improvements_summary = []
+        for idx, finding in enumerate(findings):
+            current_code = finding.get("Current Code", "")
+            improved_code = finding.get("Improved Code", "")
+            
+            clean_current_code = current_code
+            if clean_current_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_current_code)
+                if code_match:
+                    clean_current_code = code_match.group(1).strip()
+            
+            clean_improved_code = improved_code
+            if clean_improved_code.startswith("```"):
+                code_match = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", clean_improved_code)
+                if code_match:
+                    clean_improved_code = code_match.group(1).strip()
+            
+            improvements_summary.append(f"Finding {idx+1}:\n- Current Code:\n{clean_current_code}\n- Improved Code:\n{clean_improved_code}\n")
+            
+        improvements_summary_str = "\n".join(improvements_summary)
+        return self.legacy_run_assembly(file_name, file_content, improvements_summary_str, spec_rules)
 
 
     @lru_cache(maxsize=10)

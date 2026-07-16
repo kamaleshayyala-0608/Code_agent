@@ -17,23 +17,19 @@ class TestRefactoringPipeline(unittest.TestCase):
 
     @patch('agent_core.LocalCodeAgentEngine._generate_local_response')
     def test_transform_file(self, mock_response):
-        # Mock responses: first call returns the refactored code, second returns validator result
-        mock_response.side_effect = ["print('refactored')", "IDENTICAL: YES"]
+        # Mock responses: returns the refactored code
+        mock_response.return_value = "print('refactored')"
         
         # Run transform_file
         res = self.engine.transform_file("test.py", "print('hello')")
         
         self.assertEqual(res, "print('refactored')")
-        self.assertEqual(mock_response.call_count, 2)
+        self.assertEqual(mock_response.call_count, 1)
         
         args1, _ = mock_response.call_args_list[0]
         prompt1 = args1[0]
         self.assertIn("Enterprise Code Transformation Engine", prompt1)
         self.assertIn("Single Responsibility Principle", prompt1)
-        
-        args2, _ = mock_response.call_args_list[1]
-        prompt2 = args2[0]
-        self.assertIn("Automated Code Behavior Validator", prompt2)
 
 if __name__ == '__main__':
     unittest.main()
