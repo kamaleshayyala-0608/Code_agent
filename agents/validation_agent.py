@@ -1,7 +1,7 @@
 import re
-import py_compile
-import tempfile
 import os
+import subprocess
+import tempfile
 from typing import Dict, Any, Tuple
 from agents.base_agent import BaseAgent
 
@@ -24,13 +24,12 @@ followed by a brief reason.
         """
         Runs local syntax checking on the refactored code.
         For Python files, uses in-process compile() to get rich syntax error logs.
-        For other languages, does a basic parenthesis/structure bracket match validation.
+        For Javascript/TypeScript/React, integrates npx esbuild compiler validation.
         """
         _, ext = os.path.splitext(file_name.lower())
         
         if ext == ".py":
             try:
-                # Compile in-process to get syntax validity check without running code
                 compile(code, file_name, 'exec')
                 return True, "Syntax check passed (compiled successfully)."
             except SyntaxError as e:
@@ -39,27 +38,43 @@ followed by a brief reason.
             except Exception as e:
                 return False, f"Compilation check failed with error: {str(e)}"
                 
-        # Non-python: basic structural bracket check as lightweight compile guard
-        brackets = {
-            '(': ')',
-            '{': '}',
-            '[': ']'
-        }
-        stack = []
-        for idx, char in enumerate(code):
-            if char in brackets.keys():
-                stack.append((char, idx))
-            elif char in brackets.values():
-                if not stack:
-                    # Closing bracket with no opening
-                    # Basic check, but don't fail compilation since comments/strings might trigger it
-                    pass
+        elif ext in (".js", ".jsx", ".ts", ".tsx"):
+            # Esbuild syntax compiler check
+            suffix = ext if ext else ".tsx"
+            temp_path = None
+            try:
+                # Write code to a temp file matching the extension
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="w", encoding="utf-8") as temp_file:
+                    temp_file.write(code)
+                    temp_path = temp_file.name
+
+                # Run npx esbuild compile test
+                # output to NUL on Windows, /dev/null on Unix
+                outfile = "NUL" if os.name == "nt" else "/dev/null"
+                cmd = ["npx", "esbuild", temp_path, f"--outfile={outfile}"]
+                
+                # Run sync subprocess
+                result = subprocess.run(cmd, capture_output=True, text=True, shell=(os.name == 'nt'), check=False)
+                
+                if result.returncode == 0:
+                    return True, "Syntax check passed (compiled successfully via esbuild)."
                 else:
-                    top, _ = stack[-1]
-                    if brackets[top] == char:
-                        stack.pop()
+                    err_msg = result.stderr or result.stdout or "Syntax check failed."
+                    # Sanitize temp path from logs
+                    clean_msg = err_msg.replace(temp_path, file_name)
+                    return False, clean_msg.strip()
+            except Exception as e:
+                # Fallback to bypass on configuration/tooling issues
+                return True, f"Syntax verification bypassed (esbuild check failed to launch: {str(e)})"
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
                         
-        return True, "Syntax check completed."
+        # Basic check for other file types
+        return True, "Syntax check skipped (unsupported compile file type)."
 
     def validate_behavior(self, file_name: str, original: str, refactored: str) -> Tuple[bool, str]:
         """

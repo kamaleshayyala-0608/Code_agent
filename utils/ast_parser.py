@@ -14,13 +14,14 @@ class ASTParser:
             "functions": [],
             "imports": [],
             "dependencies": [],
+            "hooks": [],
             "complexity_estimate": 1
         }
         
         try:
             tree = ast.parse(content)
         except SyntaxError:
-            # Fallback to regex if syntax error (e.g. incomplete code)
+            # Fallback to regex if syntax error
             return ASTParser.parse_with_regex(content, "py")
 
         complexity = 1
@@ -67,13 +68,7 @@ class ASTParser:
                         })
                 metadata["classes"].append(cls_info)
 
-            # Extract standalone functions
-            elif isinstance(node, ast.FunctionDef):
-                # Check if it's not nested inside a class (we only want module-level here)
-                # Walk does not tell us nesting, so let's verify parent scope by traversing tree hierarchically
-                pass
-
-        # To get proper scoping, traverse node bodies hierarchically
+        # Standalone functions
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
                 args = [arg.arg for arg in node.args.args]
@@ -91,77 +86,125 @@ class ASTParser:
     @staticmethod
     def parse_with_regex(content: str, ext: str) -> Dict[str, Any]:
         """
-        Regex-based parsing fallback for non-Python or broken files.
+        Regex-based parsing for non-Python or TS/JS/JSX/TSX files.
+        Extracts components, classes, functions, imports, and React hooks.
         """
         metadata = {
             "classes": [],
             "functions": [],
             "imports": [],
             "dependencies": [],
+            "hooks": [],
             "complexity_estimate": 1
         }
         
         # Approximate complexity by counting branching keywords
-        branching_keywords = ["if", "for", "while", "catch", "try", "switch", "&&", "||"]
+        branching_keywords = [
+            r"\bif\b", r"\bfor\b", r"\bwhile\b", r"\bcatch\b", r"\btry\b", 
+            r"\bcase\b", r"&&", r"\|\|", r"\?\."
+        ]
         complexity = 1
-        for kw in branching_keywords:
-            complexity += content.count(kw)
+        for pattern in branching_keywords:
+            complexity += len(re.findall(pattern, content))
         metadata["complexity_estimate"] = complexity
 
         # 1. Classes regex
-        class_pattern = r"(?:class|interface)\s+([a-zA-Z0-9_$]+)"
+        class_pattern = r"\bclass\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+([a-zA-Z0-9_$.]+))?"
         classes = re.findall(class_pattern, content)
-        for cls in classes:
+        for cls, base in classes:
             metadata["classes"].append({
                 "name": cls,
                 "methods": [],
                 "docstring": "",
-                "bases": []
+                "bases": [base] if base else []
             })
 
-        # 2. Functions regex
-        # JavaScript/TypeScript/Python/C++/Java function signatures
-        func_patterns = [
-            r"function\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)",  # JS/TS/PHP function
-            r"(?:public|private|protected|static|\s)+\s+([a-zA-Z0-9_$<>]+)\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)\s*\{",  # Java/C++ method
-            r"(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*\(([^)]*)\)\s*=>",  # JS/TS arrow function
-            r"def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\):"  # Python def
+        # 2. React Hooks extraction
+        hook_patterns = [
+            r"\buseState\s*\(",
+            r"\buseEffect\s*\(",
+            r"\buseMemo\s*\(",
+            r"\buseCallback\s*\(",
+            r"\buseRef\s*\(",
+            r"\buseContext\s*\(",
+            r"\buseReducer\s*\("
         ]
-        
-        for pattern in func_patterns:
-            matches = re.finditer(pattern, content)
-            for m in matches:
-                groups = m.groups()
-                if len(groups) == 2:
-                    name, args = groups
-                elif len(groups) == 3:
-                    _, name, args = groups
-                else:
-                    continue
-                    
-                arg_list = [a.strip().split(":")[-1].strip() for a in args.split(",") if a.strip()]
-                metadata["functions"].append({
-                    "name": name,
-                    "arguments": arg_list,
-                    "returns": "unknown",
-                    "docstring": ""
-                })
+        # Match user-defined custom hooks too (e.g. useAuth, useQuery)
+        custom_hook_matches = re.findall(r"\b(use[A-Z][a-zA-Z0-9_$]+)\s*\(", content)
+        for hook in custom_hook_matches:
+            if hook not in metadata["hooks"]:
+                metadata["hooks"].append(hook)
+                
+        for pattern in hook_patterns:
+            name = pattern.replace(r"\b", "").replace(r"\s*\(", "")
+            if re.search(pattern, content):
+                if name not in metadata["hooks"]:
+                    metadata["hooks"].append(name)
 
-        # 3. Imports regex
+        # 3. Functions/React Component signatures
+        func_signatures = []
+        
+        # Match functional components: e.g. const Login: React.FC = (props) => { ... }
+        fc_pattern = r"\b(?:const|let|var)\s+([A-Z][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+)?\s*=\s*(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>"
+        fc_components = re.findall(fc_pattern, content)
+        for comp in fc_components:
+            func_signatures.append({
+                "name": comp,
+                "arguments": [],
+                "returns": "JSX.Element",
+                "docstring": "React Functional Component"
+            })
+            
+        # Match traditional functions: e.g. function handleLogin(...) { ... }
+        traditional_fn_pattern = r"\bfunction\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)"
+        traditional_fns = re.findall(traditional_fn_pattern, content)
+        for name, args in traditional_fns:
+            arg_list = [a.strip() for a in args.split(",") if a.strip()]
+            func_signatures.append({
+                "name": name,
+                "arguments": arg_list,
+                "returns": "unknown",
+                "docstring": ""
+            })
+
+        # Match methods in classes: e.g. handleLogin(e) { ... }
+        method_pattern = r"\b([a-zA-Z0-9_$]+)\s*\(([^)]*)\)\s*\{\s*\n"
+        methods = re.findall(method_pattern, content)
+        for name, args in methods:
+            # Exclude standard language keywords that match function signature patterns
+            if name not in ("if", "for", "while", "switch", "catch", "function"):
+                arg_list = [a.strip() for a in args.split(",") if a.strip()]
+                # If we have classes, add to class methods, else add as functions
+                if metadata["classes"]:
+                    metadata["classes"][0]["methods"].append({
+                        "name": name,
+                        "arguments": arg_list,
+                        "returns": "unknown"
+                    })
+                else:
+                    func_signatures.append({
+                        "name": name,
+                        "arguments": arg_list,
+                        "returns": "unknown",
+                        "docstring": ""
+                    })
+                    
+        metadata["functions"] = func_signatures
+
+        # 4. Imports & local dependencies
         import_patterns = [
-            r"import\s+[\s\S]*?\s+from\s+['\"]([^'\"]+)['\"]",  # ES6 imports
-            r"require\(['\"]([^'\"]+)['\"]\)",  # CommonJS require
-            r"import\s+([a-zA-Z0-9_.*]+);",  # Java imports
-            r"#include\s+<([^>]+)>",  # C++ header include
-            r"#include\s+\"([^\"]+)\"",  # C++ local include
-            r"import\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"  # Dynamic imports
+            r"\bimport\s+[\s\S]*?\s+from\s+['\"]([^'\"]+)['\"]",  # ES6 imports
+            r"\brequire\(['\"]([^'\"]+)['\"]\)",  # CommonJS require
+            r"\bimport\s+([a-zA-Z0-9_.*]+);"  # Java imports
         ]
         
         for pattern in import_patterns:
             matches = re.findall(pattern, content)
             for imp in matches:
                 metadata["imports"].append(imp)
-                metadata["dependencies"].append(imp)
+                # Keep local imports as dependencies
+                if imp.startswith("."):
+                    metadata["dependencies"].append(imp)
 
         return metadata
 
