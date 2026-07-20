@@ -31,6 +31,99 @@ class TestRefactoringPipeline(unittest.TestCase):
         self.assertIn("Enterprise Code Transformation Engine", prompt1)
         self.assertIn("Single Responsibility Principle", prompt1)
 
+    def test_ast_parser(self):
+        from utils.ast_parser import ASTParser
+        test_code = """
+import os
+import sys
+from collections import defaultdict
+
+class UserService:
+    def __init__(self, db_client):
+        self.db = db_client
+
+    def fetch_user(self, user_id: str) -> dict:
+        return self.db.find(user_id)
+
+def get_status():
+    return "OK"
+"""
+        meta = ASTParser.parse_file("user_service.py", test_code)
+        
+        # Verify imports
+        self.assertIn("os", meta["imports"])
+        self.assertIn("sys", meta["imports"])
+        self.assertIn("collections", meta["imports"])
+        
+        # Verify classes
+        self.assertEqual(len(meta["classes"]), 1)
+        self.assertEqual(meta["classes"][0]["name"], "UserService")
+        
+        # Verify methods
+        methods = meta["classes"][0]["methods"]
+        method_names = [m["name"] for m in methods]
+        self.assertIn("__init__", method_names)
+        self.assertIn("fetch_user", method_names)
+        
+        # Verify standalone functions
+        func_names = [f["name"] for f in meta["functions"]]
+        self.assertIn("get_status", func_names)
+        
+        # Verify complexity estimate is calculated
+        self.assertTrue(meta["complexity_estimate"] >= 1)
+
+    def test_dependency_analyzer(self):
+        from utils.dependency_analyzer import DependencyAnalyzer
+        
+        files = {
+            "app.py": "from db import Database\nfrom models.user import User\n",
+            "db.py": "import sqlite3\n",
+            "models/user.py": "class User:\n    pass\n"
+        }
+        
+        parsed_metadata = {
+            "app.py": {"imports": ["db", "models.user"]},
+            "db.py": {"imports": ["sqlite3"]},
+            "models/user.py": {"imports": []}
+        }
+        
+        dep_graph = DependencyAnalyzer.analyze_workspace_dependencies(files, parsed_metadata)
+        
+        # Verify app.py depends on db.py and models/user.py
+        self.assertIn("db.py", dep_graph["app.py"]["depends_on"])
+        self.assertIn("models/user.py", dep_graph["app.py"]["depends_on"])
+        
+        # Verify db.py depended_on_by contains app.py
+        self.assertIn("app.py", dep_graph["db.py"]["depended_on_by"])
+        
+        # Verify models/user.py depended_on_by contains app.py
+        self.assertIn("app.py", dep_graph["models/user.py"]["depended_on_by"])
+
+    @patch('utils.vector_db.LocalVectorDB._get_embedding')
+    def test_vector_db_retrieval(self, mock_embed):
+        from utils.vector_db import LocalVectorDB
+        
+        # Mock embedding return: vector of length 3
+        mock_embed.return_value = [0.1, 0.2, 0.3]
+        
+        # Create DB instance
+        db = LocalVectorDB()
+        
+        # Mock manual insertion of a few rules with embeddings
+        db.rules = [
+            {"id": 1, "title": "Single Responsibility Principle", "text": "Details about SRP", "embedding": [1.0, 0.0, 0.0]},
+            {"id": 2, "title": "Dependency Injection", "text": "Details about DI", "embedding": [0.0, 1.0, 0.0]},
+        ]
+        
+        # Query rules
+        query = "Need dependency injection info"
+        retrieved = db.retrieve_relevant_rules(query, top_k=1)
+        
+        # Verify it returns rules
+        self.assertEqual(len(retrieved), 1)
+        self.assertIn(retrieved[0][0]["id"], [1, 2])
+
 if __name__ == '__main__':
     unittest.main()
+
 

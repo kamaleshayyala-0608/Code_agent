@@ -877,3 +877,13 @@ Return your response under the header '### Complete Refactored File' and include
         if not aggregated_code:
             return ""
         return "\n".join(aggregated_code)
+
+    def run_multi_agent_pipeline(self, files: Dict[str, str]) -> Generator[Dict[str, Any], None, None]:
+        """
+        Runs the multi-agent refactoring pipeline on a dictionary of file contents.
+        Yields progress steps to the consumer.
+        """
+        from agents.orchestrator import RefactoringOrchestrator
+        orchestrator = RefactoringOrchestrator(model_name=self.model)
+        yield from orchestrator.refactor_project(files)
+

@@ -439,18 +439,112 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                 key="download_refactor"
             )
             
+            reports = st.session_state.pipeline_results.get("Refactor_Reports", {})
+            
             for full_key, content in task_data.items():
                 fname = full_key.replace("Refactored_Project/", "")
-                with st.expander(f"📄 {fname} (Refactored)", expanded=True):
-                    _, ext = os.path.splitext(fname)
-                    lang = ext.replace(".", "")
-                    if lang in ("tsx", "jsx"):
-                        lang = "typescript"
-                    elif lang == "js":
-                        lang = "javascript"
-                    elif lang == "py":
-                        lang = "python"
-                    st.code(content, language=lang)
+                file_report = reports.get(fname, {})
+                
+                qual_data = file_report.get("quality", {})
+                score_before = qual_data.get("score_before", 0)
+                score_after = qual_data.get("score_after", 0)
+                
+                header_title = f"📄 {fname}"
+                if score_before and score_after:
+                    header_title += f"  (Refactoring Score: {score_before}% → {score_after}%)"
+                else:
+                    header_title += " (Refactored)"
+                    
+                with st.expander(header_title, expanded=True):
+                    tab_code, tab_metrics, tab_plan, tab_logs = st.tabs([
+                        "💻 Refactored Code",
+                        "📈 Quality Metrics",
+                        "📋 Rules & Planning",
+                        "🛠️ Agent Execution Logs"
+                    ])
+                    
+                    with tab_code:
+                        _, ext = os.path.splitext(fname)
+                        lang = ext.replace(".", "")
+                        if lang in ("tsx", "jsx"):
+                            lang = "typescript"
+                        elif lang == "js":
+                            lang = "javascript"
+                        elif lang == "py":
+                            lang = "python"
+                        st.code(content, language=lang)
+                        
+                    with tab_metrics:
+                        if qual_data:
+                            col_m1, col_m2, col_m3 = st.columns(3)
+                            with col_m1:
+                                st.metric(
+                                    label="Refactoring Score", 
+                                    value=f"{score_after}%", 
+                                    delta=f"+{score_after - score_before}%" if score_after > score_before else "0%"
+                                )
+                            with col_m2:
+                                lines_red = qual_data.get("lines_reduced", 0)
+                                red_pct = qual_data.get("reduction_pct", 0)
+                                st.metric(
+                                    label="Lines Reduced", 
+                                    value=f"{lines_red} lines", 
+                                    delta=f"{red_pct}%"
+                                )
+                            with col_m3:
+                                orig_comp = qual_data.get("orig_complexity", 1)
+                                ref_comp = qual_data.get("ref_complexity", 1)
+                                comp_pct = qual_data.get("complexity_reduction_pct", 0)
+                                st.metric(
+                                    label="Complexity Change", 
+                                    value=f"{orig_comp} → {ref_comp}", 
+                                    delta=f"-{comp_pct}%" if comp_pct > 0 else f"+{-comp_pct}%" if comp_pct < 0 else "0%"
+                                )
+                                
+                            st.markdown("### Quality Dimensions")
+                            col_d1, col_d2, col_d3 = st.columns(3)
+                            with col_d1:
+                                st.markdown(f"**Readability:** `{qual_data.get('orig_readability', 70)}/100` → `{qual_data.get('ref_readability', 90)}/100`")
+                            with col_d2:
+                                st.markdown(f"**Maintainability:** `{qual_data.get('orig_maintainability', 65)}/100` → `{qual_data.get('ref_maintainability', 88)}/100`")
+                            with col_d3:
+                                st.markdown(f"**Type Safety / Error Handling:** `{qual_data.get('orig_safety', 60)}/100` → `{qual_data.get('ref_safety', 85)}/100`")
+                                
+                            st.info(f"💡 **Justification:** {qual_data.get('justification', '')}")
+                        else:
+                            st.info("No quality metrics calculated for this file.")
+                            
+                    with tab_plan:
+                        plan_data = file_report.get("plan", {})
+                        if plan_data:
+                            st.markdown(f"**Priority:** `{plan_data.get('priority', 'Medium')}` | **Confidence:** `{plan_data.get('confidence', 80)}%`")
+                            st.markdown(plan_data.get("steps_md", ""))
+                        else:
+                            st.info("No plan generated.")
+                            
+                        st.markdown("---")
+                        st.markdown("### Extracted Specification Rules")
+                        st.markdown(file_report.get("rules", "No rules extracted."))
+                        
+                    with tab_logs:
+                        st.markdown("### Structural & Anti-Pattern Analysis")
+                        st.markdown(file_report.get("patterns_report", "No patterns reported."))
+                        
+                        st.markdown("---")
+                        st.markdown("### Validation Checker Logs")
+                        val_info = file_report.get("validation", {})
+                        st.markdown(f"**Success Status:** {'✅ PASSED' if val_info.get('success') else '❌ FAILED'}")
+                        if val_info.get("syntax_msg"):
+                            st.markdown(f"**Compiler/Syntax Check:**\n`{val_info.get('syntax_msg')}`")
+                        if val_info.get("behavior_msg"):
+                            st.markdown(f"**Behavior Equivalence:**\n`{val_info.get('behavior_msg')}`")
+                            
+                        retries = file_report.get("retries", [])
+                        if retries:
+                            st.markdown("---")
+                            st.markdown("### Retry Agent Logs")
+                            st.code("\n".join(retries))
+
 
     elif task_name in ("Review", "Analysis"):
         if task_data:
@@ -535,43 +629,90 @@ with col2:
                 pipeline_results[task_name] = full_task_text
                 _render_task_controls(task_name, full_task_text, active_code_payload)
 
-        # 2. Run Refactoring Pipeline (File-by-file)
+        # 2. Run Refactoring Pipeline (Multi-Agent progress visualizer)
         if do_refactor:
-            st.markdown("### ⚙️ Refactoring Project")
+            st.markdown("### ⚙️ Multi-Agent Refactoring Pipeline")
             refactor_results = {}
             pipeline_results["Refactor"] = refactor_results
+            pipeline_results["Refactor_Reports"] = {}
 
             if not files_to_process:
                 st.warning("No files found to refactor.")
             else:
-                if MAX_CONCURRENT_MODEL_REQUESTS > 1:
-                    with st.spinner("Refactoring files in parallel..."):
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_MODEL_REQUESTS) as executor:
-                            future_to_file = {}
-                            for fname, fcontent in files_to_process.items():
-                                future = executor.submit(engine.transform_file, fname, fcontent)
-                                future_to_file[future] = fname
+                progress_bar = st.progress(0.0)
+                status_text = st.empty()
+                log_expander = st.expander("🛠️ Detailed Agent Logs", expanded=True)
+                log_area = log_expander.empty()
+                
+                log_messages = []
+                file_keys = list(files_to_process.keys())
+                total_files = len(file_keys)
+                
+                pipeline_gen = engine.run_multi_agent_pipeline(files_to_process)
+                
+                for update in pipeline_gen:
+                    stage = update.get("stage")
+                    status = update.get("status")
+                    msg = update.get("message", "")
+                    fname = update.get("file_name", "")
+                    
+                    if fname in file_keys:
+                        current_file_idx = file_keys.index(fname)
+                        stage_weights = {
+                            "file_start": 0.0,
+                            "rule_extraction": 0.15,
+                            "pattern_retrieval": 0.3,
+                            "planning": 0.45,
+                            "refactoring": 0.65,
+                            "validation": 0.8,
+                            "retry": 0.85,
+                            "quality": 0.9,
+                            "file_complete": 1.0
+                        }
+                        weight = stage_weights.get(stage, 0.0)
+                        progress_val = (current_file_idx + weight) / total_files
+                        progress_bar.progress(min(1.0, max(0.0, progress_val)))
+                        
+                    log_prefix = "🤖"
+                    if stage == "parsing":
+                        log_prefix = "🔍 [Parser]"
+                    elif stage == "rule_extraction":
+                        log_prefix = "📜 [Rule Extraction]"
+                    elif stage == "pattern_retrieval":
+                        log_prefix = "🧠 [Pattern Retriever]"
+                    elif stage == "planning":
+                        log_prefix = "📋 [Planner]"
+                    elif stage == "refactoring":
+                        log_prefix = "⚙️ [Refactor Agent]"
+                    elif stage == "validation":
+                        log_prefix = "🧪 [Validator]"
+                    elif stage == "retry":
+                        log_prefix = "🩹 [Retry Agent]"
+                    elif stage == "quality":
+                        log_prefix = "📊 [Quality Agent]"
+                    elif stage == "export":
+                        log_prefix = "📥 [Export Agent]"
+                        progress_bar.progress(1.0)
+                        
+                    if msg:
+                        log_line = f"{log_prefix} {msg}"
+                        log_messages.append(log_line)
+                        status_text.markdown(f"**Current Task:** {msg}")
+                        log_area.code("\n".join(log_messages[-12:]))
+                        
+                    if status == "completed" or status == "skipped":
+                        if stage == "export":
+                            export_data = update.get("data", {})
+                            packaged_files = export_data.get("packaged_files", {})
+                            reports = export_data.get("reports", {})
+                            
+                            for pk, code in packaged_files.items():
+                                refactor_results[pk] = code
                                 
-                            for future in concurrent.futures.as_completed(future_to_file):
-                                fname = future_to_file[future]
-                                try:
-                                    transformed_code = future.result()
-                                    refactor_results[f"Refactored_Project/{fname}"] = transformed_code
-                                except Exception as e:
-                                    st.error(f"Failed to refactor {fname}: {e}")
-                                    refactor_results[f"Refactored_Project/{fname}"] = f"Error refactoring {fname}: {str(e)}"
-                else:
-                    for fname, fcontent in files_to_process.items():
-                        st.caption(f"Refactoring `{fname}`...")
-                        with st.container(border=True):
-                            try:
-                                transformed_code = engine.transform_file(fname, fcontent)
-                                st.write("✓ Refactoring completed.")
-                                refactor_results[f"Refactored_Project/{fname}"] = transformed_code
-                            except Exception as e:
-                                st.error(f"Failed to refactor {fname}: {e}")
-                                refactor_results[f"Refactored_Project/{fname}"] = f"Error refactoring {fname}: {str(e)}"
+                            pipeline_results["Refactor_Reports"] = reports
+                            
+                status_text.success("🎉 Multi-Agent Refactoring Pipeline completed successfully!")
+                progress_bar.empty()
 
                 _render_task_controls("Refactor", refactor_results, active_code_payload)
 

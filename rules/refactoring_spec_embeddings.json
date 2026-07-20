@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "title": "1. Single Responsibility Principle (SRP)",
+    "text": "## 1. Single Responsibility Principle (SRP)\n- Every module, class, and function must have a single, well-defined responsibility.\n- Extract unrelated operations or sub-tasks into separate, dedicated functions or utility modules.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 2,
+    "title": "2. Dependency Injection",
+    "text": "## 2. Dependency Injection\n- Avoid hardcoded dependencies or instantiating objects directly inside consumer code where possible.\n- Inject database clients, configuration, external service helpers, or dependent instances via constructors, factory arguments, or parameters to facilitate testing and mockability.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 3,
+    "title": "3. Meaningful Naming",
+    "text": "## 3. Meaningful Naming\n- Use descriptive, self-documenting names for variables, functions, and classes.\n- Follow consistent conventions: `camelCase` for variables and functions, `PascalCase` for classes and types, and `UPPER_SNAKE_CASE` for constants.\n- Avoid single-character variable names except for simple loop counters.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 4,
+    "title": "4. Remove Duplicate Code (DRY)",
+    "text": "## 4. Remove Duplicate Code (DRY)\n- Do not repeat logic across files or functions.\n- Consolidate common behaviors into shared utilities, modules, helper components, or base patterns.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 5,
+    "title": "5. Extract Utilities",
+    "text": "## 5. Extract Utilities\n- Pure helper functions that do not maintain internal state should be grouped into separate utility files (e.g., in a `utils/` or `helpers/` module).",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 6,
+    "title": "6. No Magic Numbers",
+    "text": "## 6. No Magic Numbers\n- Replace hardcoded numbers, strings, or flags with named constants or enums to clarify intent and allow single-source edits.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 7,
+    "title": "7. Use Type Hints",
+    "text": "## 7. Use Type Hints\n- In Python, leverage explicit type annotations for function signatures, class attributes, and complex variables.\n- Ensure all function inputs and return values have descriptive type annotations.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 8,
+    "title": "8. Proper Exception Handling",
+    "text": "## 8. Proper Exception Handling\n- Use specific exception handling clauses; avoid catch-all `except Exception:` blocks unless logs/re-raises are properly structured.\n- Never let exceptions fail silently. Log detailed context and implement graceful degradation or user alerts where applicable.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 9,
+    "title": "9. No Nested Functions",
+    "text": "## 9. No Nested Functions\n- Avoid defining local helper functions inside other functions.\n- Promote them to file-level helpers, standalone utility functions, or methods to enhance readability, unit testability, and reuse.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 10,
+    "title": "10. Maximum Function Length",
+    "text": "## 10. Maximum Function Length\n- Maintain small, digestible functions. No function should exceed 40-50 lines of active logic.\n- Break larger methods down along functional boundaries.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 11,
+    "title": "11. Maximum Class Length",
+    "text": "## 11. Maximum Class Length\n- Keep class declarations concise, aiming for under 300 lines.\n- Offload responsibilities to auxiliary helper classes or service modules when a class grows too large.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 12,
+    "title": "12. Logging Standards",
+    "text": "## 12. Logging Standards\n- Integrate structured, contextual logging. Do not use plain print statements for production code.\n- Categorize logs with correct severity levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 13,
+    "title": "13. Caching Rules",
+    "text": "## 13. Caching Rules\n- Use in-memory or redis/file-based caching for slow, resource-heavy, or repetitive API integrations or calculations.\n- Ensure cache key schemas are unique and expire properly.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 14,
+    "title": "14. Performance Rules",
+    "text": "## 14. Performance Rules\n- Minimize redundant work, nested loops, and slow queries.\n- Optimize runtime performance: leverage memoization, lazy loading, and efficient data structures.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 15,
+    "title": "15. Security Rules",
+    "text": "## 15. Security Rules\n- Prevent injection vectors and sanitize/validate inputs at all trust boundaries.\n- Keep credentials, API keys, and sensitive settings out of code; fetch them dynamically from environment variables or secure storage.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 16,
+    "title": "16. Import Ordering",
+    "text": "## 16. Import Ordering\n- Organize imports systematically:\n  1. Standard library imports\n  2. Third-party library dependencies\n  3. Local project modules / relative imports\n- Keep import groups separated by a single blank line and sorted alphabetically.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 17,
+    "title": "17. Folder Structure Rules",
+    "text": "## 17. Folder Structure Rules\n- Group modules logically by feature/domain or clean architectural layers.\n- Do not bypass module boundaries (no circular references).",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  },
+  {
+    "id": 18,
+    "title": "18. Testing Rules",
+    "text": "## 18. Testing Rules\n- Write unit tests or verification functions for critical utility paths and core business logic.\n- Keep components testable by decoupling side effects from logic.",
+    "embedding": [
+      0.1,
+      0.2,
+      0.3
+    ]
+  }
+]
