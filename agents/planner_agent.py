@@ -6,19 +6,18 @@ class PlannerAgent:
 
     def generate_plan(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generates a structured refactoring plan locally based on the detected
-        patterns and dependency constraints, bypassing the LLM.
+        Formulates a multi-pass refactoring plan locally based on statically
+        scanned code smells and dependency graphs, bypassing the LLM.
         """
         patterns = context.get("patterns_list", [])
         file_name = context.get("file_name", "unknown")
         
-        # Decide if refactoring is required
-        # If the only pattern is the default fallback, skip refactoring
+        # Determine if refactoring is required
         clean_code = len(patterns) == 0 or (len(patterns) == 1 and patterns[0] == "Code Quality Opportunity")
         should_refactor = not clean_code
         
         # Determine priority
-        if "God Class / Overly Complex Component" in patterns:
+        if "Circular Imports" in patterns or "Large Component" in patterns:
             priority = "Critical"
         elif len(patterns) >= 3:
             priority = "High"
@@ -27,63 +26,78 @@ class PlannerAgent:
         else:
             priority = "Low"
 
-        # Determine confidence based on dependency graph
-        # More files importing this file -> higher risk, lower confidence score
+        # Determine confidence score
+        # Base is 95, penalize for circular dependencies and high caller coupling
         dep_narrative = context.get("dependency_narrative", "")
-        # Extract imports counting by parsing narrative or metadata
-        imported_count = dep_narrative.count("Imported by local workspace files")
-        confidence = max(50, 95 - (imported_count * 8))
-
-        # Build step-by-step instructions based on detected patterns
-        steps = []
-        step_num = 1
+        imported_count = dep_narrative.count("Imported by local workspace")
         
-        if "God Class / Overly Complex Component" in patterns:
-            steps.append(f"{step_num}. **Split Complex Structure**: Break down the large component or class into modular, single-responsibility files or classes.")
-            step_num += 1
-            
-        if "Long Method / Function" in patterns:
-            steps.append(f"{step_num}. **Extract Functions**: Identify active code blocks inside methods exceeding 40 lines and extract them into separate standalone helper functions.")
-            step_num += 1
-            
-        if "Nested condition blocks (Deep Nesting)" in patterns:
-            steps.append(f"{step_num}. **Simplify Conditionals**: Use guard clauses (early returns) to flatten deeply nested `if/else` condition blocks.")
-            step_num += 1
-            
-        if "Magic Numbers / Hardcoded constants" in patterns:
-            steps.append(f"{step_num}. **Extract Constants**: Gather all inline raw numbers/strings and declare them as named UPPER_CASE constants at the top of the file.")
-            step_num += 1
-            
-        if "Lack of Type Annotations / Type Safety" in patterns:
-            steps.append(f"{step_num}. **Add Type System Definitions**: Declare explicit type annotations for parameter arguments, variables, and function return values.")
-            step_num += 1
-            
-        if "Improper Exception Handling (Silent Exceptions)" in patterns:
-            steps.append(f"{step_num}. **Enhance Exception Handling**: Stop catching generic exceptions silently. Add logging or throw errors back to callers.")
-            step_num += 1
-            
-        if "Missing Memoization / Performance Optimization" in patterns:
-            steps.append(f"{step_num}. **Memoize React Mappings**: Wrap array mappings, operations, and child callbacks inside React's `useMemo` and `useCallback` hooks.")
-            step_num += 1
+        confidence = 95
+        if "Circular Imports" in patterns:
+            confidence -= 15
+        confidence -= min(30, imported_count * 5)
+        confidence = max(50, confidence)
 
-        if not steps:
-            steps.append("1. **Minor formatting**: Apply minor import sorting and code spacing improvements.")
+        # Multi-Pass steps mapping
+        pass1_steps = [] # Safety & Types / Imports
+        pass2_steps = [] # Code Smells
+        pass3_steps = [] # Performance / Memoization
+        pass4_steps = [] # Architecture / SRP
+
+        if "Lack of Type Annotations / Type Safety" in patterns:
+            pass1_steps.append("- Inject proper type definitions (e.g. PEP 484 type annotations or TypeScript interfaces) for function arguments and return blocks.")
+        if "Circular Imports" in patterns:
+            pass1_steps.append("- Decouple imported circular dependencies by moving shared symbols into a separate utility module.")
+            
+        if "Long Function" in patterns:
+            pass2_steps.append("- Extract nested block statements inside long functions into standalone module-level helper routines.")
+        if "Deep Nesting" in patterns:
+            pass2_steps.append("- Collapsed deeply nested logic branches using guard clauses (early exit checks).")
+        if "Magic Numbers" in patterns:
+            pass2_steps.append("- Gather and extract unmapped numeric literals, replacing them with named constants at the module header.")
+
+        if "Missing Memoization / Performance Optimization" in patterns:
+            pass3_steps.append("- Wrap inline list `.map` / `.filter` structures inside React's `useMemo` hooks to prevent redundant rendering.")
+        if "Duplicate Code" in patterns:
+            pass3_steps.append("- Consolidate duplicated/repeated logic nodes into helper functions to enforce DRY principles.")
+
+        if "Large Component" in patterns:
+            pass4_steps.append("- Refactor the large monolithic file layout, splitting sub-components into distinct, single-responsibility files.")
+
+        # If clean, add default pass formatting
+        if not pass1_steps and not pass2_steps and not pass3_steps and not pass4_steps:
+            pass1_steps.append("- Standardize import formatting and spacing.")
 
         # Build steps Markdown
-        steps_md = "# Refactoring Implementation Plan\n\n"
-        steps_md += f"We have formulated a customized refactoring strategy for `{file_name}` targeting the resolved code smells.\n\n"
-        steps_md += "### Implementation Steps:\n"
-        for step in steps:
-            steps_md += f"- {step}\n"
-            
-        steps_md += f"\n### Verification Constraints:\n"
-        steps_md += f"- **Target Interface Preservation**: {dep_narrative.strip()}\n"
+        steps_md = "# Multi-Pass Refactoring Implementation Plan\n\n"
+        steps_md += f"We have structured a 4-pass refactoring pipeline for `{file_name}` to safely isolate changes.\n\n"
+        
+        if pass1_steps:
+            steps_md += "### Pass 1: Safety & Imports\n"
+            for step in pass1_steps:
+                steps_md += f"{step}\n"
+        if pass2_steps:
+            steps_md += "\n### Pass 2: Structural Code Smells\n"
+            for step in pass2_steps:
+                steps_md += f"{step}\n"
+        if pass3_steps:
+            steps_md += "\n### Pass 3: Performance & Optimization\n"
+            for step in pass3_steps:
+                steps_md += f"{step}\n"
+        if pass4_steps:
+            steps_md += "\n### Pass 4: Clean Architecture (SRP)\n"
+            for step in pass4_steps:
+                steps_md += f"{step}\n"
 
         return {
             "should_refactor": should_refactor,
             "priority": priority,
             "confidence": confidence,
             "steps_md": steps_md,
-            "steps": [s.split("**")[1].split("**")[0] for s in steps if "**" in s], # String list of step names
+            "steps": {
+                "pass1": pass1_steps,
+                "pass2": pass2_steps,
+                "pass3": pass3_steps,
+                "pass4": pass4_steps
+            },
             "raw_output": steps_md
         }

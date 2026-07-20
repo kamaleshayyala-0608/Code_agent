@@ -16,7 +16,7 @@ class ExportAgent:
     ) -> Dict[str, str]:
         """
         Organizes refactored code files, reports, and metadata JSON files
-        into a structured package dictionary.
+        into a structured package dictionary with advanced enterprise metrics.
         """
         packaged = {}
         
@@ -40,7 +40,6 @@ class ExportAgent:
             
             # Extract directory/base name
             fname_base, _ = os.path.splitext(fname)
-            # Normalize path for archive structures
             fname_base_norm = fname_base.replace("\\", "/")
             fname_norm = fname.replace("\\", "/")
 
@@ -60,8 +59,7 @@ class ExportAgent:
             if plan.get("should_refactor", True):
                 refactored_count += 1
             
-            # Simple rule counting by checking headers
-            rules_count = rules_md.count("### ") or rules_md.count("Rule ID:") or 1
+            rules_count = rules_md.count("✓ **") or 1
             total_rules += rules_count
             total_patterns += len(patterns_list)
             
@@ -75,7 +73,7 @@ class ExportAgent:
             
             total_retries += len(retries)
 
-            # 2. Refactoring Report
+            # 2. Refactoring Report (Markdown)
             report_md = f"""# Refactoring Report for `{fname_norm}`
 
 ## Problems Found
@@ -96,14 +94,14 @@ class ExportAgent:
 - **Behavioral Equivalence:** {validation.get('behavior_msg', 'N/A')}
 
 ## Quality Evaluation
-- **Before Score:** {score_before}%
-- **After Score:** {score_after}%
-- **Readability:** {quality.get('orig_readability', 70)}/100 → {quality.get('ref_readability', 90)}/100
-- **Maintainability:** {quality.get('orig_maintainability', 65)}/100 → {quality.get('ref_maintainability', 88)}/100
-- **Safety/Type System:** {quality.get('orig_safety', 60)}/100 → {quality.get('ref_safety', 85)}/100
+- **Maintainability Index (Before):** {quality.get('orig_mi', 70)}%
+- **Maintainability Index (After):** {quality.get('ref_mi', 90)}%
+- **Cyclomatic Complexity:** {quality.get('orig_complexity', 1)} → {quality.get('ref_complexity', 1)} ({quality.get('complexity_reduction_pct', 0)}% change)
+- **Cognitive nesting Complexity:** {quality.get('orig_cognitive', 1)} → {quality.get('ref_cognitive', 1)}
+- **File Dependency Coupling:** {quality.get('orig_coupling', 0)} → {quality.get('ref_coupling', 0)}
+- **Dead Code (Unused imports):** {quality.get('dead_code_count', 0)} imports
 
 - **Lines of Code:** {quality.get('orig_lines', 0)} → {quality.get('ref_lines', 0)} ({quality.get('lines_reduced', 0)} lines, {quality.get('reduction_pct', 0)}% change)
-- **Complexity Estimate:** {quality.get('orig_complexity', 1)} → {quality.get('ref_complexity', 1)} ({quality.get('complexity_reduction_pct', 0)}% change)
 
 - **Justification:** {quality.get('justification', '')}
 """
@@ -124,17 +122,24 @@ class ExportAgent:
             # Populate metadata dicts
             validation_report[fname_norm] = {
                 "syntax": "PASS" if "passed" in validation.get("syntax_msg", "").lower() or validation.get("success", False) else "FAIL",
-                "behavior": "PASS" if not validation.get("behavior_msg") or "passed" in validation.get("behavior_msg", "").lower() or validation.get("success", False) else "FAIL",
+                "behavior": "PASS" if validation.get("success", False) else "FAIL",
                 "compile": "PASS" if "passed" in validation.get("syntax_msg", "").lower() or validation.get("success", False) else "FAIL"
             }
             
             quality_metrics[fname_norm] = {
                 "before_score": score_before,
                 "after_score": score_after,
-                "complexity_before": quality.get("orig_complexity", 1),
-                "complexity_after": quality.get("ref_complexity", 1),
-                "duplication_removed": max(0, quality.get("orig_lines", 0) - quality.get("ref_lines", 0)),
-                "readability_change": f"{quality.get('orig_readability', 70)}% -> {quality.get('ref_readability', 90)}%"
+                "maintainability_index_before": quality.get("orig_mi", 70),
+                "maintainability_index_after": quality.get("ref_mi", 90),
+                "cyclomatic_complexity_before": quality.get("orig_complexity", 1),
+                "cyclomatic_complexity_after": quality.get("ref_complexity", 1),
+                "cognitive_complexity_before": quality.get("orig_cognitive", 1),
+                "cognitive_complexity_after": quality.get("ref_cognitive", 1),
+                "coupling_before": quality.get("orig_coupling", 0),
+                "coupling_after": quality.get("ref_coupling", 0),
+                "dead_code_count": quality.get("dead_code_count", 0),
+                "lines_before": quality.get("orig_lines", 0),
+                "lines_after": quality.get("ref_lines", 0)
             }
 
         # 6. Consolidated Validation Report
@@ -166,7 +171,7 @@ class ExportAgent:
 """
         for fname_norm, val in validation_report.items():
             metrics = quality_metrics.get(fname_norm, {})
-            summary_md += f"- **`{fname_norm}`**: Refactoring Score: `{metrics.get('before_score')}%` → `{metrics.get('after_score')}%` | Validation: `[Compile: {val.get('compile')}, Behavior: {val.get('behavior')}]` \n"
+            summary_md += f"- **`{fname_norm}`**: Maintainability Index: `{metrics.get('maintainability_index_before')}%` → `{metrics.get('maintainability_index_after')}%` | Validation: `[Compile: {val.get('compile')}, Behavior: {val.get('behavior')}]` \n"
 
         packaged["SUMMARY.md"] = summary_md
 

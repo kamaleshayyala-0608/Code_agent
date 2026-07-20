@@ -1,6 +1,8 @@
 import ast
 import re
 import os
+import subprocess
+import json
 from typing import Dict, Any, List
 
 class ASTParser:
@@ -12,9 +14,12 @@ class ASTParser:
         metadata = {
             "classes": [],
             "functions": [],
+            "interfaces": [],
             "imports": [],
+            "exports": [],
             "dependencies": [],
             "hooks": [],
+            "symbol_references": [],
             "complexity_estimate": 1
         }
         
@@ -68,6 +73,12 @@ class ASTParser:
                         })
                 metadata["classes"].append(cls_info)
 
+            # Track variable names / function names as symbol references
+            elif isinstance(node, ast.Name):
+                name = node.id
+                if name not in metadata["symbol_references"] and len(name) > 1:
+                    metadata["symbol_references"].append(name)
+
         # Standalone functions
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
@@ -86,19 +97,20 @@ class ASTParser:
     @staticmethod
     def parse_with_regex(content: str, ext: str) -> Dict[str, Any]:
         """
-        Regex-based parsing for non-Python or TS/JS/JSX/TSX files.
-        Extracts components, classes, functions, imports, and React hooks.
+        Regex-based parsing fallback for TS/JS files.
         """
         metadata = {
             "classes": [],
             "functions": [],
+            "interfaces": [],
             "imports": [],
+            "exports": [],
             "dependencies": [],
             "hooks": [],
+            "symbol_references": [],
             "complexity_estimate": 1
         }
         
-        # Approximate complexity by counting branching keywords
         branching_keywords = [
             r"\bif\b", r"\bfor\b", r"\bwhile\b", r"\bcatch\b", r"\btry\b", 
             r"\bcase\b", r"&&", r"\|\|", r"\?\."
@@ -129,7 +141,6 @@ class ASTParser:
             r"\buseContext\s*\(",
             r"\buseReducer\s*\("
         ]
-        # Match user-defined custom hooks too (e.g. useAuth, useQuery)
         custom_hook_matches = re.findall(r"\b(use[A-Z][a-zA-Z0-9_$]+)\s*\(", content)
         for hook in custom_hook_matches:
             if hook not in metadata["hooks"]:
@@ -141,10 +152,8 @@ class ASTParser:
                 if name not in metadata["hooks"]:
                     metadata["hooks"].append(name)
 
-        # 3. Functions/React Component signatures
+        # 3. Functions / React Component signatures
         func_signatures = []
-        
-        # Match functional components: e.g. const Login: React.FC = (props) => { ... }
         fc_pattern = r"\b(?:const|let|var)\s+([A-Z][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+)?\s*=\s*(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>"
         fc_components = re.findall(fc_pattern, content)
         for comp in fc_components:
@@ -155,7 +164,6 @@ class ASTParser:
                 "docstring": "React Functional Component"
             })
             
-        # Match traditional functions: e.g. function handleLogin(...) { ... }
         traditional_fn_pattern = r"\bfunction\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)"
         traditional_fns = re.findall(traditional_fn_pattern, content)
         for name, args in traditional_fns:
@@ -166,51 +174,70 @@ class ASTParser:
                 "returns": "unknown",
                 "docstring": ""
             })
-
-        # Match methods in classes: e.g. handleLogin(e) { ... }
-        method_pattern = r"\b([a-zA-Z0-9_$]+)\s*\(([^)]*)\)\s*\{\s*\n"
-        methods = re.findall(method_pattern, content)
-        for name, args in methods:
-            # Exclude standard language keywords that match function signature patterns
-            if name not in ("if", "for", "while", "switch", "catch", "function"):
-                arg_list = [a.strip() for a in args.split(",") if a.strip()]
-                # If we have classes, add to class methods, else add as functions
-                if metadata["classes"]:
-                    metadata["classes"][0]["methods"].append({
-                        "name": name,
-                        "arguments": arg_list,
-                        "returns": "unknown"
-                    })
-                else:
-                    func_signatures.append({
-                        "name": name,
-                        "arguments": arg_list,
-                        "returns": "unknown",
-                        "docstring": ""
-                    })
                     
         metadata["functions"] = func_signatures
 
         # 4. Imports & local dependencies
         import_patterns = [
-            r"\bimport\s+[\s\S]*?\s+from\s+['\"]([^'\"]+)['\"]",  # ES6 imports
-            r"\brequire\(['\"]([^'\"]+)['\"]\)",  # CommonJS require
-            r"\bimport\s+([a-zA-Z0-9_.*]+);"  # Java imports
+            r"\bimport\s+[\s\S]*?\s+from\s+['\"]([^'\"]+)['\"]",
+            r"\brequire\(['\"]([^'\"]+)['\"]\)"
         ]
         
         for pattern in import_patterns:
             matches = re.findall(pattern, content)
             for imp in matches:
                 metadata["imports"].append(imp)
-                # Keep local imports as dependencies
                 if imp.startswith("."):
                     metadata["dependencies"].append(imp)
+
+        # 5. Simple symbol reference matching
+        words = re.findall(r"\b[a-zA-Z0-9_$]+\b", content)
+        for w in words:
+            if w not in metadata["symbol_references"] and len(w) > 1:
+                metadata["symbol_references"].append(w)
 
         return metadata
 
     @classmethod
     def parse_file(cls, filename: str, content: str) -> Dict[str, Any]:
         _, ext = os.path.splitext(filename.lower())
+        
         if ext == ".py":
             return cls.parse_python_file(content)
+            
+        elif ext in (".js", ".jsx", ".ts", ".tsx"):
+            # Execute node sidecar for TS AST Compiler API parsing
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            parser_js_path = os.path.join(base_dir, "utils", "ts_parser.js")
+            
+            # Formulate temp file to feed into Node
+            import tempfile
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False, mode="w", encoding="utf-8") as temp_file:
+                    temp_file.write(content)
+                    temp_path = temp_file.name
+
+                cmd = ["node", parser_js_path, temp_path]
+                result = subprocess.run(cmd, capture_output=True, text=True, shell=(os.name == 'nt'), check=False)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    parsed_meta = json.loads(result.stdout)
+                    
+                    # Compute local dependencies relative to this folder
+                    parsed_meta["dependencies"] = []
+                    for imp in parsed_meta.get("imports", []):
+                        if imp.startswith("."):
+                            parsed_meta["dependencies"].append(imp)
+                    return parsed_meta
+            except Exception:
+                pass # Fallback to regex parsing on error
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+
+        # Regex fallback on non-TS/non-py
         return cls.parse_with_regex(content, ext[1:] if ext else "")

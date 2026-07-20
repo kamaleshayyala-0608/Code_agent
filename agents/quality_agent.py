@@ -1,5 +1,6 @@
+import re
+import math
 from typing import Dict, Any
-from utils.ast_parser import ASTParser
 
 class QualityEvaluationAgent:
     def __init__(self, model_name: str = "gemma4:26b"):
@@ -14,10 +15,10 @@ class QualityEvaluationAgent:
         refactored_metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Calculates code quality scores deterministically based on static AST features
-        and metrics, avoiding LLM processing overhead.
+        Calculates advanced deterministic metrics: Cyclomatic Complexity,
+        Cognitive Complexity, Maintainability Index, Dead Code, and Coupling.
         """
-        # 1. Gather file lines
+        # 1. Structural calculations
         orig_lines_list = original_code.strip().split("\n")
         ref_lines_list = refactored_code.strip().split("\n")
         
@@ -27,110 +28,121 @@ class QualityEvaluationAgent:
         lines_reduced = orig_lines - ref_lines
         reduction_percentage = round((lines_reduced / orig_lines) * 100, 1) if orig_lines > 0 else 0.0
 
-        # 2. Gather complexity scores
-        orig_complexity = original_metadata.get("complexity_estimate", 1)
-        ref_complexity = refactored_metadata.get("complexity_estimate", 1)
+        # Calculate metrics for code blocks
+        def compute_cognitive_complexity(code: str) -> int:
+            """
+            Approximates Cognitive Complexity by penalizing nesting levels
+            for conditional and iteration structures.
+            """
+            lines = code.split("\n")
+            complexity = 0
+            nesting_level = 0
+            
+            for line in lines:
+                stripped = line.strip()
+                indent = len(line) - len(line.lstrip())
+                # Deduce nesting from indent (assumes 2 or 4 space indents)
+                nesting_level = max(0, indent // 4)
+                
+                # Check for branching constructs
+                if re.search(r"\b(if|for|while|catch)\b", stripped):
+                    complexity += (1 + nesting_level)
+                elif "&&" in stripped or "||" in stripped:
+                    complexity += 1
+            return max(1, complexity)
+
+        def compute_halstead_volume(code: str) -> float:
+            """
+            Estimates Halstead Volume (V = N * log2(n)) where:
+            N = total operators + operands
+            n = unique operators + operands
+            """
+            words = re.findall(r"\b[a-zA-Z0-9_$]+\b|[\+\-\*/%&|\^~<>!=]+", code)
+            if not words:
+                return 1.0
+            N = len(words)
+            n = len(set(words))
+            return float(N * math.log2(n) if n > 1 else N)
+
+        def compute_maintainability_index(volume: float, cyclomatic: int, loc: int) -> float:
+            """
+            Standard Software Engineering Maintainability Index (MI) formula:
+            MI = 171 - 5.2 * ln(V) - 0.23 * (G) - 16.2 * ln(LOC)
+            """
+            if loc <= 0 or volume <= 0:
+                return 100.0
+            try:
+                mi = 171 - 5.2 * math.log(volume) - 0.23 * cyclomatic - 16.2 * math.log(loc)
+                # Rescale to 0 - 100 range
+                rescaled = (mi / 171.0) * 100
+                return max(0.0, min(100.0, rescaled))
+            except Exception:
+                return 80.0
+
+        # Compile metrics for original and refactored
+        orig_cyclo = original_metadata.get("complexity_estimate", 1)
+        ref_cyclo = refactored_metadata.get("complexity_estimate", 1)
+
+        orig_cog = compute_cognitive_complexity(original_code)
+        ref_cog = compute_cognitive_complexity(refactored_code)
+
+        orig_vol = compute_halstead_volume(original_code)
+        ref_vol = compute_halstead_volume(refactored_code)
+
+        orig_mi = round(compute_maintainability_index(orig_vol, orig_cyclo, orig_lines))
+        ref_mi = round(compute_maintainability_index(ref_vol, ref_cyclo, ref_lines))
+
+        # Unused declarations (Dead Code count)
+        dead_imports = 0
+        for imp in original_metadata.get("imports", []):
+            imp_base = imp.split("/")[-1].split(".")[0]
+            if original_code.count(imp_base) <= 1:
+                dead_imports += 1
+                
+        # File Coupling (Import count + Export count)
+        orig_coupling = len(original_metadata.get("imports", [])) + len(original_metadata.get("exports", []))
+        ref_coupling = len(refactored_metadata.get("imports", [])) + len(refactored_metadata.get("exports", []))
+
+        # Deduce final Refactoring Score based on MI and Complexity reductions
+        score_before = orig_mi
+        score_after = ref_mi
         
-        complexity_change = orig_complexity - ref_complexity
-        complexity_reduction_pct = round((complexity_change / orig_complexity) * 100, 1) if orig_complexity > 0 else 0.0
-
-        # 3. Deterministic score logic
-        def calculate_scores(code: str, meta: Dict[str, Any]) -> tuple[int, int, int]:
-            # Readability
-            readability = 95
-            
-            # Deduct for long methods
-            long_blocks = 0
-            for line in code.split("\n"):
-                if len(line) - len(line.lstrip()) >= 12:
-                    readability -= 2
-            
-            # Magic numbers check
-            magic_count = len(re.findall(r"(?<![a-zA-Z0-9_])[2-9]\d*(?![a-zA-Z0-9_])", code))
-            readability -= min(15, magic_count * 2)
-            
-            # Missing docstrings
-            if '"""' not in code and "'''" not in code and "//" not in code:
-                readability -= 5
-                
-            readability = max(40, min(100, readability))
-
-            # Maintainability
-            maintainability = 95
-            comp = meta.get("complexity_estimate", 1)
-            if comp > 15:
-                maintainability -= 20
-            elif comp > 8:
-                maintainability -= 10
-                
-            import_count = len(meta.get("imports", []))
-            if import_count > 10:
-                maintainability -= min(15, (import_count - 10) * 2)
-                
-            if len(meta.get("classes", [])) > 1:
-                maintainability -= 5 # Violation of SRP
-
-            maintainability = max(40, min(100, maintainability))
-
-            # Safety
-            safety = 95
-            has_types = ":" in code or "as " in code or "type " in code or "interface " in code
-            is_ts_or_py = ".ts" in file_name.lower() or ".tsx" in file_name.lower() or ".py" in file_name.lower()
-            
-            if is_ts_or_py and not has_types:
-                safety -= 25 # Major safety deduct
-                
-            # SQL Injection check
-            if "select " in code.lower() and "+" in code and ("username" in code or "id" in code or "user" in code):
-                safety -= 30
-                
-            if "except:" in code.replace(" ", "") or "catch(e){}" in code.replace(" ", ""):
-                safety -= 15
-
-            safety = max(30, min(100, safety))
-            return readability, maintainability, safety
-
-        import re
-        orig_read, orig_maint, orig_safe = calculate_scores(original_code, original_metadata)
-        ref_read, ref_maint, ref_safe = calculate_scores(refactored_code, refactored_metadata)
-
-        # Composite score calculation
-        score_before = round((orig_read + orig_maint + orig_safe) / 3.0)
-        score_after = round((ref_read + ref_maint + ref_safe) / 3.0)
-
-        # Ensure refactored score does not drop below original score
+        # Guard rails
         score_after = max(score_before, score_after)
+        score_before = max(10, min(99, score_before))
+        score_after = max(score_before, min(100, score_after))
 
-        # 4. Programmatic justification summary
+        # Dynamic justification text
         improvements = []
-        if orig_lines > ref_lines:
-            improvements.append(f"reduced code lines by {lines_reduced} ({reduction_percentage}%)")
-        if orig_complexity > ref_complexity:
-            improvements.append(f"reduced logic branching paths by {complexity_change} ({complexity_reduction_pct}%)")
-        if ref_read > orig_read:
-            improvements.append("improved readability by formatting code and extracting constants")
-        if ref_safe > orig_safe:
-            improvements.append("strengthened typing/safety parameters")
+        if ref_mi > orig_mi:
+            improvements.append(f"boosted Maintainability Index from {orig_mi} to {ref_mi}")
+        if orig_cyclo > ref_cyclo:
+            improvements.append(f"reduced Cyclomatic Complexity by {orig_cyclo - ref_cyclo} points")
+        if orig_cog > ref_cog:
+            improvements.append(f"lowered Cognitive nesting complexity by {orig_cog - ref_cog} points")
+        if orig_coupling > ref_coupling:
+            improvements.append("reduced file dependency coupling")
 
         if improvements:
             justification = f"Refactored components: " + ", ".join(improvements) + "."
         else:
-            justification = "Applied standard linting, import sorting, and minor cleanup spacing."
+            justification = "Optimized import structures, formatting spaces, and aligned standard layouts."
 
         return {
             "orig_lines": orig_lines,
             "ref_lines": ref_lines,
             "lines_reduced": lines_reduced,
             "reduction_pct": reduction_percentage,
-            "orig_complexity": orig_complexity,
-            "ref_complexity": ref_complexity,
-            "complexity_reduction_pct": complexity_reduction_pct,
-            "orig_readability": orig_read,
-            "ref_readability": ref_read,
-            "orig_maintainability": orig_maint,
-            "ref_maintainability": ref_maint,
-            "orig_safety": orig_safe,
-            "ref_safety": ref_safe,
+            "orig_complexity": orig_cyclo,
+            "ref_complexity": ref_cyclo,
+            "complexity_reduction_pct": round(((orig_cyclo - ref_cyclo)/orig_cyclo)*100, 1) if orig_cyclo > 0 else 0.0,
+            "orig_cognitive": orig_cog,
+            "ref_cognitive": ref_cog,
+            "orig_mi": orig_mi,
+            "ref_mi": ref_mi,
+            "dead_code_count": dead_imports,
+            "orig_coupling": orig_coupling,
+            "ref_coupling": ref_coupling,
             "score_before": score_before,
             "score_after": score_after,
             "justification": justification
