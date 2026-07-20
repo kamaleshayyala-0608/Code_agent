@@ -123,6 +123,54 @@ def get_status():
         self.assertEqual(len(retrieved), 1)
         self.assertIn(retrieved[0][0]["id"], [1, 2])
 
+    def test_export_agent(self):
+        from agents.export_agent import ExportAgent
+        
+        original_files = {
+            "app.py": "print('original')"
+        }
+        refactored_files = {
+            "app.py": "print('refactored')"
+        }
+        reports = {
+            "app.py": {
+                "rules": "### Rule 1: Use Type Hints",
+                "patterns_list": ["Magic Numbers"],
+                "patterns_report": "Found magic numbers.",
+                "plan": {"priority": "High", "confidence": 95, "steps_md": "- Add hints"},
+                "validation": {"success": True, "syntax_msg": "Syntax passed", "behavior_msg": "Behavior passed"},
+                "retries": [],
+                "quality": {
+                    "score_before": 70,
+                    "score_after": 95,
+                    "orig_readability": 70,
+                    "ref_readability": 95,
+                    "orig_lines": 10,
+                    "ref_lines": 8
+                }
+            }
+        }
+        
+        exporter = ExportAgent()
+        packaged = exporter.package_refactored_project(original_files, refactored_files, reports)
+        
+        # Verify ZIP folders and files are created
+        self.assertIn("Refactored_Project/app.py", packaged)
+        self.assertIn("Refactoring_Report/app.md", packaged)
+        self.assertIn("Planning/app_plan.json", packaged)
+        self.assertIn("Rules/app_rules.md", packaged)
+        self.assertIn("Pattern_Analysis/app_patterns.json", packaged)
+        self.assertIn("Validation/validation_report.json", packaged)
+        self.assertIn("Metrics/quality_metrics.json", packaged)
+        self.assertIn("SUMMARY.md", packaged)
+        
+        # Check SUMMARY.md contents
+        summary = packaged["SUMMARY.md"]
+        self.assertIn("Files Processed", summary)
+        self.assertIn("Files Refactored", summary)
+        self.assertIn("Average Score Before", summary)
+        self.assertIn("Average Score After", summary)
+
 if __name__ == '__main__':
     unittest.main()
 

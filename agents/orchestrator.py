@@ -347,7 +347,7 @@ class RefactoringOrchestrator:
         }
         
         try:
-            packaged = self.exporter.package_refactored_project(refactored_files)
+            packaged = self.exporter.package_refactored_project(files, refactored_files, pipeline_details)
             zip_bytes = self.exporter.build_zip_archive(packaged)
             
             yield {
