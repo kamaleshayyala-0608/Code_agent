@@ -40,7 +40,6 @@ def legacy_parse_stage1_output(text: str) -> list:
             "Improved Code": "",
             "Implementation Notes": "",
             "Expected Benefit": "",
-            
             "Estimated Effort": "",
             "Priority": ""
         }
