@@ -1,0 +1,34 @@
+{
+  "code_smells": [
+    {
+      "name": "Long Function",
+      "description": "Functions exceeding 40 lines of code or multiple responsibility blocks.",
+      "remedy": "Extract nested blocks into standalone module-level helper routines."
+    },
+    {
+      "name": "Deep Nesting",
+      "description": "Branching structures nested > 3 levels deep.",
+      "remedy": "Use guard clauses and early returns."
+    },
+    {
+      "name": "Magic Numbers",
+      "description": "Unmapped literal numeric values inline in code logic.",
+      "remedy": "Extract into UPPERCASE constant definitions at module top."
+    },
+    {
+      "name": "Circular Imports",
+      "description": "Mutual cross-import loops between local modules.",
+      "remedy": "Decouple into a dedicated shared utility module."
+    },
+    {
+      "name": "Missing Memoization",
+      "description": "Uncached expensive operations inside React functional components.",
+      "remedy": "Wrap inside useMemo / useCallback hooks."
+    },
+    {
+      "name": "Unused Imports / Dead Code",
+      "description": "Imported modules or declared symbols that are never referenced.",
+      "remedy": "Prune unused imports and dead declarations."
+    }
+  ]
+}

@@ -658,79 +658,118 @@ with col2:
             if not files_to_process:
                 st.warning("No files found to refactor.")
             else:
+                # Progress Step Badges (Item 11)
+                step_cols = st.columns(7)
+                step_badges = {
+                    "Scanning": step_cols[0].empty(),
+                    "Context": step_cols[1].empty(),
+                    "Planning": step_cols[2].empty(),
+                    "Refactoring": step_cols[3].empty(),
+                    "Validation": step_cols[4].empty(),
+                    "Retry": step_cols[5].empty(),
+                    "Packaging": step_cols[6].empty(),
+                }
+
+                def update_step_ui(completed_steps=None):
+                    completed_steps = completed_steps or set()
+                    labels = ["Scanning", "Context", "Planning", "Refactoring", "Validation", "Retry", "Packaging"]
+                    for idx, name in enumerate(labels):
+                        icon = "✔" if name in completed_steps else "⏳"
+                        status_str = f"**{name}** {icon}"
+                        step_badges[name].markdown(status_str)
+
+                completed_steps = set()
+                update_step_ui(completed_steps)
+
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
-                log_expander = st.expander("🛠️ Detailed Agent Logs", expanded=True)
+                log_expander = st.expander("🛠️ Detailed Execution & Timing Logs", expanded=True)
                 log_area = log_expander.empty()
-                
+
                 log_messages = []
                 file_keys = list(files_to_process.keys())
                 total_files = len(file_keys)
-                
+
                 pipeline_gen = engine.run_multi_agent_pipeline(files_to_process)
-                
+
                 for update in pipeline_gen:
                     stage = update.get("stage")
                     status = update.get("status")
                     msg = update.get("message", "")
                     fname = update.get("file_name", "")
-                    
+
+                    if stage == "parsing" and status == "completed":
+                        completed_steps.add("Scanning")
+                    elif stage == "context_building" and status == "completed":
+                        completed_steps.add("Context")
+                    elif stage == "planning" and status == "completed":
+                        completed_steps.add("Planning")
+                    elif stage == "refactoring" and status == "completed":
+                        completed_steps.add("Refactoring")
+                    elif stage == "validation" and status == "completed":
+                        completed_steps.add("Validation")
+                    elif stage == "retry":
+                        completed_steps.add("Retry")
+                    elif stage == "export" and status == "completed":
+                        completed_steps.add("Packaging")
+
+                    update_step_ui(completed_steps)
+
                     if fname in file_keys:
                         current_file_idx = file_keys.index(fname)
                         stage_weights = {
                             "file_start": 0.0,
-                            "rule_extraction": 0.15,
-                            "pattern_retrieval": 0.3,
-                            "planning": 0.45,
-                            "refactoring": 0.65,
-                            "validation": 0.8,
+                            "planning": 0.2,
+                            "refactoring": 0.5,
+                            "validation": 0.75,
                             "retry": 0.85,
-                            "quality": 0.9,
+                            "quality": 0.95,
                             "file_complete": 1.0
                         }
                         weight = stage_weights.get(stage, 0.0)
                         progress_val = (current_file_idx + weight) / total_files
                         progress_bar.progress(min(1.0, max(0.0, progress_val)))
-                        
+
                     log_prefix = "🤖"
                     if stage == "parsing":
-                        log_prefix = "🔍 [Parser]"
-                    elif stage == "rule_extraction":
-                        log_prefix = "📜 [Rule Extraction]"
-                    elif stage == "pattern_retrieval":
-                        log_prefix = "🧠 [Pattern Retriever]"
+                        log_prefix = "🔍 [Scanner]"
+                    elif stage == "context_building":
+                        log_prefix = "🌐 [Context Builder]"
                     elif stage == "planning":
                         log_prefix = "📋 [Planner]"
                     elif stage == "refactoring":
-                        log_prefix = "⚙️ [Refactor Agent]"
+                        log_prefix = "⚙️ [5-Pass Refactor]"
                     elif stage == "validation":
-                        log_prefix = "🧪 [Validator]"
+                        log_prefix = "🧪 [8-Point Validator]"
                     elif stage == "retry":
-                        log_prefix = "🩹 [Retry Agent]"
+                        log_prefix = "🩹 [Retry Loop]"
                     elif stage == "quality":
                         log_prefix = "📊 [Quality Agent]"
                     elif stage == "export":
                         log_prefix = "📥 [Export Agent]"
                         progress_bar.progress(1.0)
-                        
+
                     if msg:
                         log_line = f"{log_prefix} {msg}"
                         log_messages.append(log_line)
-                        status_text.markdown(f"**Current Task:** {msg}")
-                        log_area.code("\n".join(log_messages[-12:]))
-                        
+                        status_text.markdown(f"**Current Execution:** {msg}")
+                        log_area.code("\n".join(log_messages[-14:]))
+
                     if status == "completed" or status == "skipped":
                         if stage == "export":
                             export_data = update.get("data", {})
                             packaged_files = export_data.get("packaged_files", {})
                             reports = export_data.get("reports", {})
-                            
+
                             for pk, code in packaged_files.items():
                                 refactor_results[pk] = code
-                                
+
                             pipeline_results["Refactor_Reports"] = reports
-                            
-                status_text.success("🎉 Multi-Agent Refactoring Pipeline completed successfully!")
+
+                completed_steps.update(["Scanning", "Context", "Planning", "Refactoring", "Validation", "Retry", "Packaging"])
+                update_step_ui(completed_steps)
+
+                status_text.success("🎉 Enterprise Execution Loop completed successfully!")
                 progress_bar.empty()
 
                 _render_task_controls("Refactor", refactor_results, active_code_payload, files_to_process)

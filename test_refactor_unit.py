@@ -125,7 +125,7 @@ def get_status():
 
     def test_export_agent(self):
         from agents.export_agent import ExportAgent
-        
+
         original_files = {
             "app.py": "print('original')"
         }
@@ -150,25 +150,20 @@ def get_status():
                 }
             }
         }
-        
+
         exporter = ExportAgent()
         packaged = exporter.package_refactored_project(original_files, refactored_files, reports, spec_rules="# Refactoring Spec Rules")
-        
-        # Verify clean ZIP layout: only source files and spec.md
-        self.assertIn("app.py", packaged)
-        self.assertEqual(packaged["app.py"], "print('refactored')")
-        self.assertIn("spec.md", packaged)
-        self.assertIn("# Refactoring Spec Rules", packaged["spec.md"])
 
-        # Verify internal reports and folders are NOT exported in ZIP
-        self.assertNotIn("Refactored_Project/app.py", packaged)
-        self.assertNotIn("Refactoring_Report/app.md", packaged)
-        self.assertNotIn("Planning/app_plan.json", packaged)
-        self.assertNotIn("Rules/app_rules.md", packaged)
-        self.assertNotIn("Pattern_Analysis/app_patterns.json", packaged)
-        self.assertNotIn("Validation/validation_report.json", packaged)
-        self.assertNotIn("Metrics/quality_metrics.json", packaged)
-        self.assertNotIn("SUMMARY.md", packaged)
+        # Verify structured ZIP layout
+        self.assertIn("refactored/app.py", packaged)
+        self.assertEqual(packaged["refactored/app.py"], "print('refactored')")
+        self.assertIn("original/app.py", packaged)
+        self.assertEqual(packaged["original/app.py"], "print('original')")
+        self.assertIn("summary.json", packaged)
+        self.assertIn("README.md", packaged)
+        self.assertIn("reports/app.py.md", packaged)
+        self.assertIn("metrics/quality_metrics.json", packaged)
+        self.assertIn("suggestions/code_smells.json", packaged)
 
 if __name__ == '__main__':
     unittest.main()

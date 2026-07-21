@@ -106,7 +106,48 @@ class LocalCodeAgentEngine:
     Core engine for interacting with the local Ollama daemon.
     Strictly separates agent orchestration from presentation logic.
     """
-    
+
+    # Modular Prompts (Item 16)
+    PLANNING_PROMPT = """You are a Principal Software Architect.
+Formulate a multi-task refactoring plan for file: {file_name}.
+Output tasks strictly as:
+Task 1: <Description>
+Task 2: <Description>
+Task 3: <Description>
+Task 4: <Description>
+Do not generate code directly."""
+
+    REFACTOR_PASS_1_MODERNIZATION_PROMPT = """You are an Enterprise Code Refactoring Engine (Pass 1: Modernization & Type Safety).
+Update syntax to modern standards, inject explicit type annotations/signatures, and clean import structures.
+Preserve all behavior and external interfaces. Return ONLY complete source code in code fence."""
+
+    REFACTOR_PASS_2_PERFORMANCE_PROMPT = """You are an Enterprise Code Refactoring Engine (Pass 2: Performance & Caching).
+Optimize data structures, loops, rendering memoization, and redundant calculations.
+Preserve all behavior and external interfaces. Return ONLY complete source code in code fence."""
+
+    REFACTOR_PASS_3_NAMING_PROMPT = """You are an Enterprise Code Refactoring Engine (Pass 3: Naming & Readability).
+Improve variable/function naming clarity, extract magic numbers to uppercase constants, and add docstrings.
+Preserve all behavior and external interfaces. Return ONLY complete source code in code fence."""
+
+    REFACTOR_PASS_4_SECURITY_PROMPT = """You are an Enterprise Code Refactoring Engine (Pass 4: Security & Error Handling).
+Sanitize inputs, sanitize exception handlers, prevent bare excepts, and ensure resource cleanup.
+Preserve all behavior and external interfaces. Return ONLY complete source code in code fence."""
+
+    REFACTOR_PASS_5_FORMATTING_PROMPT = """You are an Enterprise Code Refactoring Engine (Pass 5: Formatting & Structure).
+Enforce Single Responsibility, standardize indents, line endings, and group helper routines cleanly.
+Preserve all behavior and external interfaces. Return ONLY complete source code in code fence."""
+
+    VALIDATION_PROMPT = """You are an Automated Code Behavior Validator.
+Verify if Refactored Code has the EXACT same behavior and external interface as Original Code.
+Respond with IDENTICAL: YES or IDENTICAL: NO followed by reason."""
+
+    RETRY_PROMPT = """You are an Autonomous Code Repair Agent.
+Fix the broken refactored code based on validation error feedback.
+Preserve functionality and interfaces. Return ONLY complete corrected source code in code fence."""
+
+    QUALITY_PROMPT = """You are a Code Quality Evaluator.
+Analyze code quality across Readability, Maintainability, Performance, Security, and Best Practices (0-100 score)."""
+
     # Expose prompts as class attributes so app.py can access them for streaming
     REVIEW_PROMPT = """You are a Principal Software Engineer.
 Analyze the COMPLETE project. Do not analyze files independently. Understand relationships between files.

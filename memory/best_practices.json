@@ -1,0 +1,21 @@
+{
+  "best_practices": {
+    "python": [
+      "Use PEP 8 naming conventions (snake_case for functions/vars, PascalCase for classes).",
+      "Explicitly annotate types using Python typing module.",
+      "Wrap standard entry points in `if __name__ == '__main__':`.",
+      "Use context managers (`with`) for file and resource handling."
+    ],
+    "javascript_typescript": [
+      "Prefer `const` over `let`, avoid `var` entirely.",
+      "Use strict type interfaces for React component props.",
+      "Handle promise rejections explicitly with try/catch or `.catch()`.",
+      "Maintain immutability when updating React state."
+    ],
+    "general": [
+      "Preserve public API interfaces during refactoring.",
+      "Maintain backward compatibility for consumer components.",
+      "Keep code deterministic, clear, and well-structured."
+    ]
+  }
+}
