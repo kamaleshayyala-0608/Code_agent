@@ -14,6 +14,8 @@ from agents.quality_agent import QualityEvaluationAgent
 from agents.export_agent import ExportAgent
 from utils.ast_parser import ASTParser
 
+REFACTORABLE_EXTENSIONS = {'.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.go', '.rs', '.php', '.rb', '.cs', '.cpp', '.c', '.h', '.hpp'}
+
 class RefactoringOrchestrator:
     def __init__(self, model_name: str = "gemma4:26b"):
         self.model_name = model_name
@@ -63,6 +65,18 @@ class RefactoringOrchestrator:
         # Step 2: Process files
         for fname, fcontent in files.items():
             file_meta = project_metadata.get(fname, {"classes": [], "functions": [], "imports": [], "dependencies": [], "complexity_estimate": 1, "dependencies_context": {"depends_on": [], "depended_on_by": []}})
+            
+            # Non-refactorable extension gate
+            _, file_ext = os.path.splitext(fname.lower())
+            if file_ext not in REFACTORABLE_EXTENSIONS:
+                yield {
+                    "file_name": fname,
+                    "stage": "file_complete",
+                    "status": "skipped",
+                    "message": f"Skipped `{fname}` — not a refactorable source file type; copied as-is."
+                }
+                refactored_files[fname] = fcontent
+                continue
             
             # Pre-populate fallback reports and codes
             file_report = {

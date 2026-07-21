@@ -375,7 +375,7 @@ followed by a brief reason.
         # The UI sends at most 8k characters per request (~2k tokens).  A
         # smaller context and concise response budget greatly reduce latency on
         # a local 26B model without truncating the input.
-        self.num_ctx = 8192
+        self.num_ctx = 32768
         self.num_predict = 2048
         self.keep_alive = "15m"
         self._response_cache: Dict[tuple[str, str], str] = {}

@@ -77,6 +77,9 @@ class ScannerAgent:
                     rel_path, content = result
                     scanned_files[rel_path] = content
 
-        # Limit total files processed for stability
-        keys = list(scanned_files.keys())[:100]
+        # Limit total files processed for stability, but prioritize real source code
+        # over schema dumps/data files so application code never gets silently dropped.
+        source_exts = {'.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.go', '.rs', '.php', '.rb', '.cs', '.cpp', '.c', '.h', '.hpp'}
+        prioritized = sorted(scanned_files.keys(), key=lambda k: 0 if os.path.splitext(k)[1].lower() in source_exts else 1)
+        keys = prioritized[:300]  # raise the cap — 100 is too low for real projects
         return {k: scanned_files[k] for k in keys}

@@ -7,7 +7,7 @@ class RefactoringAgent(BaseAgent):
         super().__init__(model_name)
 
     def _predict_budget(self, prompt_text: str) -> int:
-        # Rough token estimate: ~4 chars/token. Leave headroom in num_ctx (8192) for the output.
+        # Rough token estimate: ~4 chars/token. Leave headroom in num_ctx (32768) for the output.
         est_input_tokens = len(prompt_text) // 4
         return max(1024, min(4096, self.num_ctx - est_input_tokens - 256))
 
