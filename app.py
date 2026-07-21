@@ -479,14 +479,7 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str, f
                             lang = "javascript"
                         elif lang == "py":
                             lang = "python"
-
-                        col_old, col_new = st.columns(2)
-                        with col_old:
-                            st.markdown("**Original Code**")
-                            st.code(original_content, language=lang)
-                        with col_new:
-                            st.markdown("**Refactored Code**")
-                            st.code(content, language=lang)
+                        st.code(content, language=lang)
                         
                     with tab_metrics:
                         if qual_data:
