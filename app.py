@@ -430,139 +430,33 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str, f
                     
     elif task_name == "Refactor":
         if task_data:
+            for full_key, content in task_data.items():
+                fname = full_key.replace("Refactored_Project/", "")
+                if fname == "spec.md":
+                    continue
+
+                st.markdown(f"### 📄 `{fname}`")
+                _, ext = os.path.splitext(fname)
+                lang = ext.replace(".", "")
+                if lang in ("tsx", "jsx"):
+                    lang = "typescript"
+                elif lang == "js":
+                    lang = "javascript"
+                elif lang == "py":
+                    lang = "python"
+
+                st.code(content, language=lang)
+                st.markdown("---")
+
             zip_bytes = create_zip_from_dict(task_data)
             st.download_button(
-                label="📥 Download Refactored Project (ZIP)",
+                label="📥 Download Refactored_Project.zip",
                 data=zip_bytes,
                 file_name="Refactored_Project.zip",
                 mime="application/zip",
                 use_container_width=True,
                 key="download_refactor"
             )
-            
-            reports = st.session_state.pipeline_results.get("Refactor_Reports", {})
-            
-            for full_key, content in task_data.items():
-                fname = full_key.replace("Refactored_Project/", "")
-                if fname == "spec.md":
-                    with st.expander("📖 Refactoring Specification (`spec.md`)", expanded=False):
-                        st.markdown(content)
-                    continue
-
-                original_content = (files_to_process or {}).get(fname, "(Original content not available — this file was newly created during refactoring.)")
-
-                file_report = reports.get(fname, {})
-                
-                qual_data = file_report.get("quality", {})
-                score_before = qual_data.get("score_before", 0)
-                score_after = qual_data.get("score_after", 0)
-                
-                header_title = f"📄 {fname}"
-                if score_before and score_after:
-                    header_title += f"  (Refactoring Score: {score_before}% → {score_after}%)"
-                else:
-                    header_title += " (Refactored)"
-                    
-                with st.expander(header_title, expanded=True):
-                    tab_code, tab_diff, tab_metrics, tab_plan, tab_logs = st.tabs([
-                        "💻 Complete Refactored Code",
-                        "🔍 Code Diff",
-                        "📈 Quality Metrics",
-                        "📋 Rules & Planning",
-                        "🛠️ Agent Execution Logs"
-                    ])
-                    
-                    with tab_code:
-                        _, ext = os.path.splitext(fname)
-                        lang = ext.replace(".", "")
-                        if lang in ("tsx", "jsx"):
-                            lang = "typescript"
-                        elif lang == "js":
-                            lang = "javascript"
-                        elif lang == "py":
-                            lang = "python"
-                        st.code(content, language=lang)
-                        
-                    with tab_diff:
-                        orig_lines = original_content.splitlines(keepends=True)
-                        ref_lines = content.splitlines(keepends=True)
-                        diff = difflib.unified_diff(orig_lines, ref_lines, fromfile=f"a/{fname}", tofile=f"b/{fname}")
-                        diff_text = "".join(diff)
-                        if diff_text.strip():
-                            st.code(diff_text, language="diff")
-                        else:
-                            st.info("No line-level differences detected between original and refactored code.")
-                        
-                    with tab_metrics:
-                        if qual_data:
-                            col_m1, col_m2, col_m3 = st.columns(3)
-                            with col_m1:
-                                st.metric(
-                                    label="Refactoring Score", 
-                                    value=f"{score_after}%", 
-                                    delta=f"+{score_after - score_before}%" if score_after > score_before else "0%"
-                                )
-                            with col_m2:
-                                lines_red = qual_data.get("lines_reduced", 0)
-                                red_pct = qual_data.get("reduction_pct", 0)
-                                st.metric(
-                                    label="Lines Reduced", 
-                                    value=f"{lines_red} lines", 
-                                    delta=f"{red_pct}%"
-                                )
-                            with col_m3:
-                                orig_comp = qual_data.get("orig_complexity", 1)
-                                ref_comp = qual_data.get("ref_complexity", 1)
-                                comp_pct = qual_data.get("complexity_reduction_pct", 0)
-                                st.metric(
-                                    label="Complexity Change", 
-                                    value=f"{orig_comp} → {ref_comp}", 
-                                    delta=f"-{comp_pct}%" if comp_pct > 0 else f"+{-comp_pct}%" if comp_pct < 0 else "0%"
-                                )
-                                
-                            st.markdown("### Quality Dimensions")
-                            col_d1, col_d2, col_d3 = st.columns(3)
-                            with col_d1:
-                                st.markdown(f"**Readability:** `{qual_data.get('orig_readability', 70)}/100` → `{qual_data.get('ref_readability', 90)}/100`")
-                            with col_d2:
-                                st.markdown(f"**Maintainability:** `{qual_data.get('orig_maintainability', 65)}/100` → `{qual_data.get('ref_maintainability', 88)}/100`")
-                            with col_d3:
-                                st.markdown(f"**Type Safety / Error Handling:** `{qual_data.get('orig_safety', 60)}/100` → `{qual_data.get('ref_safety', 85)}/100`")
-                                
-                            st.info(f"💡 **Justification:** {qual_data.get('justification', '')}")
-                        else:
-                            st.info("No quality metrics calculated for this file.")
-                            
-                    with tab_plan:
-                        plan_data = file_report.get("plan", {})
-                        if plan_data:
-                            st.markdown(f"**Priority:** `{plan_data.get('priority', 'Medium')}` | **Confidence:** `{plan_data.get('confidence', 80)}%`")
-                            st.markdown(plan_data.get("steps_md", ""))
-                        else:
-                            st.info("No plan generated.")
-                            
-                        st.markdown("---")
-                        st.markdown("### Extracted Specification Rules")
-                        st.markdown(file_report.get("rules", "No rules extracted."))
-                        
-                    with tab_logs:
-                        st.markdown("### Structural & Anti-Pattern Analysis")
-                        st.markdown(file_report.get("patterns_report", "No patterns reported."))
-                        
-                        st.markdown("---")
-                        st.markdown("### Validation Checker Logs")
-                        val_info = file_report.get("validation", {})
-                        st.markdown(f"**Success Status:** {'✅ PASSED' if val_info.get('success') else '❌ FAILED'}")
-                        if val_info.get("syntax_msg"):
-                            st.markdown(f"**Compiler/Syntax Check:**\n`{val_info.get('syntax_msg')}`")
-                        if val_info.get("behavior_msg"):
-                            st.markdown(f"**Behavior Equivalence:**\n`{val_info.get('behavior_msg')}`")
-                            
-                        retries = file_report.get("retries", [])
-                        if retries:
-                            st.markdown("---")
-                            st.markdown("### Retry Agent Logs")
-                            st.code("\n".join(retries))
 
 
     elif task_name in ("Review", "Analysis"):

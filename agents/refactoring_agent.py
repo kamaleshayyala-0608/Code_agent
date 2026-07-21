@@ -32,7 +32,7 @@ class RefactoringAgent(BaseAgent):
         Returns the COMPLETE refactored source code string.
         """
         result = self.transform_full_file(context, plan)
-        return result["refactored_content"]
+        return result["refactored_code"]
 
     def transform_full_file(self, context: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
         original_code = context['original_code']
@@ -77,6 +77,5 @@ Rewrite the COMPLETE source file from line 1 to the end:"""
 
         return {
             "file_path": file_name,
-            "original_content": original_code,
-            "refactored_content": final_code
+            "refactored_code": final_code
         }

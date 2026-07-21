@@ -154,16 +154,16 @@ def get_status():
         exporter = ExportAgent()
         packaged = exporter.package_refactored_project(original_files, refactored_files, reports, spec_rules="# Refactoring Spec Rules")
 
-        # Verify structured ZIP layout
-        self.assertIn("refactored/app.py", packaged)
-        self.assertEqual(packaged["refactored/app.py"], "print('refactored')")
-        self.assertIn("original/app.py", packaged)
-        self.assertEqual(packaged["original/app.py"], "print('original')")
-        self.assertIn("summary.json", packaged)
-        self.assertIn("README.md", packaged)
-        self.assertIn("reports/app.py.md", packaged)
-        self.assertIn("metrics/quality_metrics.json", packaged)
-        self.assertIn("suggestions/code_smells.json", packaged)
+        # Verify clean ZIP layout (only source files)
+        self.assertIn("app.py", packaged)
+        self.assertEqual(packaged["app.py"], "print('refactored')")
+        self.assertNotIn("refactored/app.py", packaged)
+        self.assertNotIn("original/app.py", packaged)
+        self.assertNotIn("summary.json", packaged)
+        self.assertNotIn("README.md", packaged)
+        self.assertNotIn("reports/app.py.md", packaged)
+        self.assertNotIn("metrics/quality_metrics.json", packaged)
+        self.assertNotIn("suggestions/code_smells.json", packaged)
 
     def test_completeness_validator(self):
         from utils.completeness_validator import CompletenessValidator

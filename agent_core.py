@@ -137,17 +137,27 @@ class LocalCodeAgentEngine:
     """
 
     # Modular Prompts (Item 16 & Critical Issue #2)
-    FULL_FILE_REFACTOR_PROMPT = """You are an Enterprise Code Transformation Engine.
-Your task is to take the original source file and return the COMPLETE updated file incorporating all architectural specification rules and planner tasks.
+    FULL_FILE_REFACTOR_PROMPT = """You are an Enterprise Refactoring Engine.
+Return ONLY the complete refactored source file.
 
-CRITICAL RULES:
-1. Rewrite the COMPLETE source file from line 1 to the end.
-2. Never omit code.
-3. Never summarize code.
-4. Never write "...","existing code", "unchanged code", "same as above", "same as before", "omitted", or "rest of file".
-5. Output must compile immediately.
-6. Every line from the original file must either remain unchanged or be improved.
-7. Return ONLY the complete source file wrapped in a markdown code fence."""
+Do NOT include:
+- explanations
+- markdown
+- code fences
+- suggestions
+- quality reports
+- summaries
+- planning
+- comments describing changes
+
+Do NOT output:
+Refactored Code:
+Suggestions:
+Explanation:
+Improvements:
+Reasoning:
+
+Output ONLY the final compilable source code from line 1 to the end."""
 
     PLANNING_PROMPT = """You are a Principal Software Architect.
 Formulate a multi-task refactoring plan for file: {file_name}.
