@@ -37,18 +37,15 @@ class RefactoringAgent(BaseAgent):
             pass1_instructions = "- General code formatting and readability cleanup."
 
         system_prompt_pass1 = """You are an Expert Full-File Refactoring Engine (Pass 1: Safety & Structural Smells).
-Your task is to refactor the ENTIRE source file. Do not output code snippets, patches, or diffs.
-
-Focus on:
-- Adding type safety parameter signatures.
-- Flattening logical indentation structures (guard clauses).
-- Extracting long helper blocks.
+Your task is to take the original source file and return the COMPLETE updated file where ALL Pass 1 refactorings are merged directly into the original code.
 
 CRITICAL INSTRUCTIONS:
+- Retain the ENTIRE original file structure, keeping all untouched imports, variables, functions, components, and logic completely intact.
+- Apply the refactoring guidelines directly in-place to the relevant sections.
 - Do NOT change public signatures unless strictly specified.
-- Do NOT output guides, explanations, snippet blocks, or conversations.
-- Do NOT write "...existing code..." or omit any part of the file.
-- Return ONLY the COMPLETE refactored source code wrapped in a code fence."""
+- Do NOT rewrite from scratch or omit any unrelated code block, function, or line.
+- Do NOT write "...existing code...", snippets, diffs, guides, or explanations.
+- Return ONLY the COMPLETE refactored source code (original code + merged changes) wrapped in a code fence."""
 
         user_prompt_pass1 = f"""File Path: {file_name}
 
@@ -60,7 +57,7 @@ Original Full File Content:
 {original_code}
 ```
 
-Provide the COMPLETE refactored file content after Pass 1:"""
+Provide the COMPLETE refactored file content (original code with Pass 1 changes merged in):"""
 
         try:
             # Execute Pass 1
@@ -82,17 +79,14 @@ Provide the COMPLETE refactored file content after Pass 1:"""
             }
 
         system_prompt_pass2 = """You are an Expert Full-File Refactoring Engine (Pass 2: Performance & Architecture).
-Your task is to refine the full source code from Pass 1.
-
-Focus on:
-- Optimizing loop computations.
-- Adding memoization helpers (e.g. React.useMemo / React.useCallback).
-- Aligning structures with Single Responsibility Principles (SRP).
+Your task is to refine the Pass 1 code by applying Pass 2 refactorings directly in-place into the source code.
 
 CRITICAL INSTRUCTIONS:
+- Retain the ENTIRE file structure, preserving all original untouched code, imports, functions, and components.
+- Apply the refactoring guidelines in-place to the relevant sections.
 - Do NOT skip any code block, write snippet fragments, or write "...existing code...".
 - Do NOT output guides, explanations, or conversations.
-- Return ONLY the COMPLETE refactored source code wrapped in a code fence."""
+- Return ONLY the COMPLETE refactored source code (original code + merged changes) wrapped in a code fence."""
 
         user_prompt_pass2 = f"""File Path: {file_name}
 
@@ -104,7 +98,7 @@ Full File Content from Pass 1:
 {pass1_code}
 ```
 
-Provide the COMPLETE final refactored file content:"""
+Provide the COMPLETE final refactored file content (original code with all changes merged in):"""
 
         try:
             # Execute Pass 2

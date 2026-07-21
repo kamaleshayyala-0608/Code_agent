@@ -3,6 +3,7 @@ import time
 import re
 import hashlib
 import json
+import difflib
 import concurrent.futures
 import streamlit as st
 from agent_core import LocalCodeAgentEngine, REQUIRED_MODEL_NAME
@@ -463,8 +464,9 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str, f
                     header_title += " (Refactored)"
                     
                 with st.expander(header_title, expanded=True):
-                    tab_code, tab_metrics, tab_plan, tab_logs = st.tabs([
-                        "💻 Refactored Code",
+                    tab_code, tab_diff, tab_metrics, tab_plan, tab_logs = st.tabs([
+                        "💻 Complete Refactored Code",
+                        "🔍 Code Diff",
                         "📈 Quality Metrics",
                         "📋 Rules & Planning",
                         "🛠️ Agent Execution Logs"
@@ -480,6 +482,16 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str, f
                         elif lang == "py":
                             lang = "python"
                         st.code(content, language=lang)
+                        
+                    with tab_diff:
+                        orig_lines = original_content.splitlines(keepends=True)
+                        ref_lines = content.splitlines(keepends=True)
+                        diff = difflib.unified_diff(orig_lines, ref_lines, fromfile=f"a/{fname}", tofile=f"b/{fname}")
+                        diff_text = "".join(diff)
+                        if diff_text.strip():
+                            st.code(diff_text, language="diff")
+                        else:
+                            st.info("No line-level differences detected between original and refactored code.")
                         
                     with tab_metrics:
                         if qual_data:
