@@ -6,6 +6,11 @@ class RefactoringAgent(BaseAgent):
     def __init__(self, model_name: str = "gemma4:26b"):
         super().__init__(model_name)
 
+    def _predict_budget(self, prompt_text: str) -> int:
+        # Rough token estimate: ~4 chars/token. Leave headroom in num_ctx (8192) for the output.
+        est_input_tokens = len(prompt_text) // 4
+        return max(1024, min(4096, self.num_ctx - est_input_tokens - 256))
+
     def execute_refactor(self, context: Dict[str, Any], plan: Dict[str, Any]) -> str:
         """
         Executes full-file code refactoring in logical Passes (Pass 1: Types & Smells;
@@ -59,7 +64,7 @@ Provide the COMPLETE refactored file content after Pass 1:"""
 
         try:
             # Execute Pass 1
-            pass1_raw = self.run_prompt(system_prompt_pass1, user_prompt_pass1, num_predict=4096)
+            pass1_raw = self.run_prompt(system_prompt_pass1, user_prompt_pass1, num_predict=self._predict_budget(user_prompt_pass1))
             pass1_code = clean_refactored_code(pass1_raw)
             if not pass1_code.strip():
                 pass1_code = original_code
@@ -103,7 +108,7 @@ Provide the COMPLETE final refactored file content:"""
 
         try:
             # Execute Pass 2
-            pass2_raw = self.run_prompt(system_prompt_pass2, user_prompt_pass2, num_predict=4096)
+            pass2_raw = self.run_prompt(system_prompt_pass2, user_prompt_pass2, num_predict=self._predict_budget(user_prompt_pass2))
             final_code = clean_refactored_code(pass2_raw)
             if not final_code.strip():
                 final_code = pass1_code

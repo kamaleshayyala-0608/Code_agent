@@ -61,7 +61,7 @@ class PlannerAgent:
             pass3_steps.append("- Consolidate duplicated/repeated logic nodes into helper functions to enforce DRY principles.")
 
         if "Large Component" in patterns:
-            pass4_steps.append("- Refactor the large monolithic file layout, splitting sub-components into distinct, single-responsibility files.")
+            pass4_steps.append("- Reorganize the large monolithic file internally: group related logic into clearly separated, single-responsibility sections/functions/sub-components WITHIN this same file. Do not attempt to output separate files — this pipeline only accepts one returned file per input file.")
 
         # If clean, add default pass formatting
         if not pass1_steps and not pass2_steps and not pass3_steps and not pass4_steps:

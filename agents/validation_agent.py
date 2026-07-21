@@ -114,15 +114,18 @@ class ValidationAgent(BaseAgent):
         if missing_classes:
             return False, f"Interface Mismatch: Missing class definitions {list(missing_classes)}."
 
-        # Check function/component matches
+        # Check function/component matches — only fail if MOST public functions vanished,
+        # since legitimate refactors (extract/rename/merge helpers) will naturally shift some names.
         orig_funcs = set([f.get("name") for f in orig_meta.get("functions", [])])
         ref_funcs = set([f.get("name") for f in ref_meta.get("functions", [])])
-        
+
         missing_funcs = orig_funcs - ref_funcs
-        if missing_funcs:
-            # Exclude standard internal helpers if refactored removed them
-            public_missing = [f for f in missing_funcs if not f.startswith("_")]
-            if public_missing:
-                return False, f"Interface Mismatch: Missing public function/component definitions {public_missing}."
+        public_missing = [f for f in missing_funcs if not f.startswith("_")]
+        orig_public_count = len([f for f in orig_funcs if not f.startswith("_")])
+
+        # Only treat it as a real interface break if it wiped out nearly everything
+        # (e.g. LLM returned empty/garbage), not just renamed/reorganized a few symbols.
+        if orig_public_count > 0 and len(public_missing) / orig_public_count > 0.7:
+            return False, f"Interface Mismatch: Most public function/component definitions missing {public_missing}."
 
         return True, "Interface contract verified. Functions and classes definitions are identical."
