@@ -64,7 +64,7 @@ Provide the COMPLETE refactored file content after Pass 1:"""
 
         try:
             # Execute Pass 1
-            pass1_raw = self.run_prompt(system_prompt_pass1, user_prompt_pass1, num_predict=self._predict_budget(user_prompt_pass1))
+            pass1_raw = self.run_prompt_complete(system_prompt_pass1, user_prompt_pass1, num_predict=self._predict_budget(user_prompt_pass1))
             pass1_code = clean_refactored_code(pass1_raw)
             if not pass1_code.strip():
                 pass1_code = original_code
@@ -108,7 +108,7 @@ Provide the COMPLETE final refactored file content:"""
 
         try:
             # Execute Pass 2
-            pass2_raw = self.run_prompt(system_prompt_pass2, user_prompt_pass2, num_predict=self._predict_budget(user_prompt_pass2))
+            pass2_raw = self.run_prompt_complete(system_prompt_pass2, user_prompt_pass2, num_predict=self._predict_budget(user_prompt_pass2))
             final_code = clean_refactored_code(pass2_raw)
             if not final_code.strip():
                 final_code = pass1_code

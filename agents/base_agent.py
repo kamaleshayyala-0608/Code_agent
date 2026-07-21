@@ -41,6 +41,57 @@ class BaseAgent:
         except Exception as e:
             raise RuntimeError(f"Agent error during Ollama generation: {str(e)}")
 
+    def run_prompt_complete(self, system_instruction: str, user_prompt: str, num_predict: int | None = None, max_continuations: int = 3) -> str:
+        """
+        Like run_prompt, but detects when Ollama cut the response short (hit the
+        num_predict ceiling) and automatically asks the model to continue until
+        the file is actually complete, or max_continuations is reached.
+        """
+        output_limit = num_predict or self.num_predict
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
+        full_content = ""
+
+        for _ in range(max_continuations + 1):
+            try:
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=messages,
+                    stream=False,
+                    think=False,
+                    options={
+                        "temperature": self.temperature,
+                        "num_ctx": self.num_ctx,
+                        "num_predict": output_limit
+                    },
+                    keep_alive=self.keep_alive,
+                )
+            except Exception as e:
+                raise RuntimeError(f"Agent error during Ollama generation: {str(e)}")
+
+            if hasattr(response, "message"):
+                chunk = response.message.content or ""
+                done_reason = getattr(response, "done_reason", None)
+            elif isinstance(response, dict):
+                chunk = response.get("message", {}).get("content", "")
+                done_reason = response.get("done_reason")
+            else:
+                chunk = str(response)
+                done_reason = None
+
+            full_content += chunk
+
+            if done_reason != "length":
+                break  # model finished on its own — nothing was cut off
+
+            # Truncated: tell it to resume exactly where it stopped
+            messages.append({"role": "assistant", "content": chunk})
+            messages.append({"role": "user", "content": "Continue exactly where you left off — do not repeat any earlier lines and do not add commentary, just resume the code."})
+
+        return full_content
+
     def run_prompt_stream(self, system_instruction: str, user_prompt: str, num_predict: int | None = None) -> Generator[str, None, None]:
         """
         Yields tokens chunk-by-chunk for streaming in the UI.
