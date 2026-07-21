@@ -7,18 +7,47 @@ from concurrent.futures import ThreadPoolExecutor
 
 REQUIRED_MODEL_NAME = "gemma4:26b"
 
+def compute_dynamic_token_budget(code: str) -> int:
+    """
+    Dynamically calculates num_predict token budget based on line count of source file (Item 9).
+    <=300 lines -> 2048
+    300-700 lines -> 4096
+    700-1200 lines -> 8192
+    1200+ lines -> 12288
+    """
+    lines = len(code.strip().split("\n")) if code else 1
+    if lines <= 300:
+        return 2048
+    elif lines <= 700:
+        return 4096
+    elif lines <= 1200:
+        return 8192
+    else:
+        return 12288
+
 def clean_refactored_code(text: str) -> str:
     """
-    Robustly extracts the code content from LLM output, removing any potential markdown code fences.
+    Extracts code content from LLM output, stripping markdown code fences.
+    Rejects outputs containing placeholder tokens (Item 6).
     """
     text = text.strip()
+    extracted = text
     code_match = re.match(r"^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$", text)
     if code_match:
-        return code_match.group(1).strip()
-    code_match_lazy = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", text)
-    if code_match_lazy:
-        return code_match_lazy.group(1).strip()
-    return text
+        extracted = code_match.group(1).strip()
+    else:
+        code_match_lazy = re.search(r"```[a-zA-Z0-9_-]*\n([\s\S]*?)```", text)
+        if code_match_lazy:
+            extracted = code_match_lazy.group(1).strip()
+
+    # Reject outputs containing banned placeholder tokens (Item 6)
+    banned_tokens = ["...", "existing code", "same as before", "omitted", "unchanged", "same as above", "rest of file"]
+    extracted_lower = extracted.lower()
+    for token in banned_tokens:
+        if token in extracted_lower:
+            raise ValueError(f"Output rejected: placeholder '{token}' detected in code.")
+
+    return extracted
 def legacy_parse_stage1_output(text: str) -> list:
     if "No refactoring required" in text or not text.strip():
         return []
@@ -107,7 +136,19 @@ class LocalCodeAgentEngine:
     Strictly separates agent orchestration from presentation logic.
     """
 
-    # Modular Prompts (Item 16)
+    # Modular Prompts (Item 16 & Critical Issue #2)
+    FULL_FILE_REFACTOR_PROMPT = """You are an Enterprise Code Transformation Engine.
+Your task is to take the original source file and return the COMPLETE updated file incorporating all architectural specification rules and planner tasks.
+
+CRITICAL RULES:
+1. Rewrite the COMPLETE source file from line 1 to the end.
+2. Never omit code.
+3. Never summarize code.
+4. Never write "...","existing code", "unchanged code", "same as above", "same as before", "omitted", or "rest of file".
+5. Output must compile immediately.
+6. Every line from the original file must either remain unchanged or be improved.
+7. Return ONLY the complete source file wrapped in a markdown code fence."""
+
     PLANNING_PROMPT = """You are a Principal Software Architect.
 Formulate a multi-task refactoring plan for file: {file_name}.
 Output tasks strictly as:

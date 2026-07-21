@@ -4,6 +4,8 @@ import json
 import zipfile
 from typing import Dict, Any
 
+from utils.completeness_validator import CompletenessValidator
+
 class ExportAgent:
     """
     Export Agent: Packages refactored code and comprehensive diagnostic reports into
@@ -40,6 +42,11 @@ class ExportAgent:
 
             orig_code = original_files.get(fname, "")
             ref_code = refactored_files.get(fname, "")
+
+            # Safeguard (Critical Issue #8): Fallback to original if empty or failed completeness
+            comp_ok, _ = CompletenessValidator.validate(fname, orig_code, ref_code)
+            if not ref_code or not ref_code.strip() or not comp_ok:
+                ref_code = orig_code
 
             is_changed = orig_code.strip() != ref_code.strip()
             if is_changed:

@@ -1,13 +1,13 @@
 from typing import Dict, Any, Callable, Tuple, List
 from agents.base_agent import BaseAgent
-from agent_core import clean_refactored_code
+from agent_core import clean_refactored_code, compute_dynamic_token_budget
+from utils.completeness_validator import CompletenessValidator
 
 class RetryAgent(BaseAgent):
     """
-    Retry Agent: Autonomous repair loop that switches prompts on each retry attempt.
-    Attempt 1: Direct syntax/error fix.
-    Attempt 2: Conservative interface-preserving rewrite.
-    Attempt 3: Minimal surgical patch.
+    Retry Agent: Autonomous repair loop that handles truncation, placeholders,
+    AST mismatches, line drops, and syntax validation failures.
+    Extends repair loop across 3 strategies.
     """
 
     def __init__(self, model_name: str = "gemma4:26b"):
@@ -26,21 +26,25 @@ class RetryAgent(BaseAgent):
         retry_logs = []
 
         system_prompts = [
-            # Attempt 1: Direct Error Fix
-            """You are an Autonomous Code Repair Agent (Attempt 1: Direct Fix).
-Analyze the error log, compare original vs broken code, and fix the specific syntax/behavior error.
+            # Attempt 1: Direct Error & Completeness Fix
+            """You are an Autonomous Code Repair Agent (Attempt 1: Anti-Truncation & Fix).
+Analyze the error log, compare original vs broken code. Rewrite the ENTIRE file from line 1 to end.
+CRITICAL: Never write '...', 'existing code', 'same as before', 'omitted', or summaries.
 Return ONLY the complete corrected source code in code fence.""",
 
             # Attempt 2: Conservative Interface Preservation
             """You are an Autonomous Code Repair Agent (Attempt 2: Conservative Interface Fix).
-The previous attempt failed validation. Ensure ALL original class names, function signatures, imports, and component exports remain strictly untouched while fixing the bug.
+The previous attempt failed. Rewrite the FULL source file, preserving all classes, functions, and interfaces.
+CRITICAL: Output must contain the complete source code from line 1 to end without omissions.
 Return ONLY the complete corrected source code in code fence.""",
 
-            # Attempt 3: Minimal Surgical Patch
-            """You are an Autonomous Code Repair Agent (Attempt 3: Surgical Patch).
-Focus exclusively on fixing the compiler error or broken reference with minimal alterations to the original structure.
+            # Attempt 3: Full-File Preservation Repair
+            """You are an Autonomous Code Repair Agent (Attempt 3: Full-File Restoration).
+Return the COMPLETE working file, preserving original logic while resolving reported compilation/truncation errors.
 Return ONLY the complete corrected source code in code fence."""
         ]
+
+        token_budget = compute_dynamic_token_budget(original_code)
 
         for attempt in range(1, max_retries + 1):
             prompt_idx = min(attempt - 1, len(system_prompts) - 1)
@@ -64,14 +68,20 @@ Return ONLY the complete corrected source code in code fence."""
 [Validation Error Feedback]
 {error_log}
 
-Please fix the file and return the complete corrected code:"""
+Rewrite the COMPLETE corrected source file from line 1 to end:"""
 
             try:
-                fixed_raw = self.run_prompt_complete(system_prompt, user_prompt, num_predict=4096)
+                fixed_raw = self.run_prompt_complete(system_prompt, user_prompt, num_predict=token_budget)
                 candidate_code = clean_refactored_code(fixed_raw)
 
-                if candidate_code and candidate_code.strip():
-                    current_code = candidate_code
+                # Check completeness first (Item 7)
+                comp_ok, comp_msg = CompletenessValidator.validate(file_name, original_code, candidate_code)
+                if not comp_ok:
+                    error_log = f"Completeness Check Failed: {comp_msg}"
+                    retry_logs.append(f"✗ Attempt {attempt} completeness failed: {comp_msg}")
+                    continue
+
+                current_code = candidate_code
 
                 # Re-validate using validation callback
                 success, validation_msg = validation_fn(file_name, current_code)
@@ -83,6 +93,7 @@ Please fix the file and return the complete corrected code:"""
                     retry_logs.append(f"✗ Attempt {attempt} failed: {validation_msg}")
 
             except Exception as e:
+                error_log = f"Exception: {str(e)}"
                 retry_logs.append(f"✗ Exception during auto-fix attempt {attempt}: {str(e)}")
 
         return False, current_code, retry_logs

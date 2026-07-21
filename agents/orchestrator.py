@@ -13,6 +13,7 @@ from core.dependency_graph import DependencyGraph
 from core.symbol_index import SymbolIndexBuilder
 from core.cache_manager import CacheManager
 from core.tool_registry import ToolRegistry
+from utils.completeness_validator import CompletenessValidator
 from agents.planner_agent import PlannerAgent
 from agents.refactoring_agent import RefactoringAgent
 from agents.validation_agent import ValidationAgent
@@ -26,9 +27,8 @@ REFACTORABLE_EXTENSIONS = {'.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.go', 
 class RefactoringOrchestrator:
     """
     Refactoring Orchestrator: Implements project-wide Execution Loop Architecture:
-    Upload -> Project Scanner -> Context Builder -> Planner -> Refactor -> Validation
-        -> Pass: Quality Check -> Export
-        -> Fail: Retry -> Refactor Again -> Quality Check -> Export
+    Upload -> Project Scanner -> Context Builder -> Planner -> Single-Pass Refactor
+        -> Completeness Check -> AST Check -> Validation -> Retry Loop -> Quality Check -> Export
     Supports parallel processing, incremental refactoring, AST caching, and stage timing logs.
     """
 
@@ -128,7 +128,7 @@ class RefactoringOrchestrator:
         pipeline_details = {}
 
         # -------------------------------------------------------------
-        # Step 3: Execution Loop per file (Planner -> Refactor -> Validation -> Loop)
+        # Step 3: Execution Loop per file (Planner -> Refactor -> Completeness -> Validation -> Loop)
         # -------------------------------------------------------------
         for fname, fcontent in files.items():
             file_meta = parsed_metadata.get(fname, {"classes": [], "functions": [], "imports": [], "dependencies": [], "complexity_estimate": 1})
@@ -147,7 +147,6 @@ class RefactoringOrchestrator:
 
             # Incremental Refactoring Check
             is_unchanged, content_hash = self.cache_manager.is_file_unchanged(fname, fcontent)
-            # (Optionally skip if cached, but we ensure full flow for fresh user requests)
 
             file_report = {
                 "rules": project_context.get("project_memory", {}).get("spec_md", "Loaded project memory rules."),
@@ -202,14 +201,15 @@ class RefactoringOrchestrator:
                 file_report["plan"] = plan
                 file_timing["Planner"] = "Failed"
 
-            # 3.3 5-Pass Refactoring Loop
+            # 3.3 Single-Pass Full-File Refactoring (Critical Issue #1 & #10)
             refactor_start = time.perf_counter()
             yield {
                 "file_name": fname,
                 "stage": "refactoring",
                 "status": "running",
-                "message": "Executing 5-pass multi-pass refactoring..."
+                "message": "Executing single-pass full-file refactoring..."
             }
+            refactor_failed = False
             try:
                 refactored_code = self.refactorer.execute_refactor(file_ctx, plan)
                 file_report["refactored_code"] = refactored_code
@@ -223,52 +223,63 @@ class RefactoringOrchestrator:
                     "data": refactored_code
                 }
             except Exception as e:
+                refactor_failed = True
                 refactored_code = fcontent
                 file_report["refactored_code"] = fcontent
-                file_timing["Refactor"] = "Failed"
+                file_timing["Refactor"] = f"Failed ({str(e)})"
                 yield {
                     "file_name": fname,
                     "stage": "refactoring",
                     "status": "failed",
-                    "message": f"Refactoring failed: {str(e)}. Reverting to original source."
+                    "message": f"Refactoring failed: {str(e)}. Triggering Repair Loop..."
                 }
-                refactored_files[fname] = fcontent
-                continue
 
-            # 3.4 Validation Agent (8-Point Checks)
+            # 3.4 Completeness Validator & 8-Point Validation Suite (Critical Issue #4 & #5)
             val_start = time.perf_counter()
             yield {
                 "file_name": fname,
                 "stage": "validation",
                 "status": "running",
-                "message": "Running 8-point validation suite..."
+                "message": "Running completeness check & 8-point validation suite..."
             }
 
             try:
-                val_summary = self.validator.validate_full(fname, fcontent, refactored_code)
+                # Completeness Check First
+                comp_ok, comp_msg = CompletenessValidator.validate(fname, fcontent, refactored_code)
+
+                if comp_ok and not refactor_failed:
+                    val_summary = self.validator.validate_full(fname, fcontent, refactored_code)
+                    is_valid = val_summary["success"]
+                    diag_msg = "\n".join(val_summary["diagnostics"])
+                else:
+                    is_valid = False
+                    diag_msg = comp_msg if not comp_ok else f"Refactor Exception: {file_timing.get('Refactor')}"
+
                 val_duration = round(time.perf_counter() - val_start, 2)
                 file_timing["Validation"] = f"{val_duration} sec"
-
-                file_report["validation"]["success"] = val_summary["success"]
-                file_report["validation"]["syntax_msg"] = "\n".join(val_summary["diagnostics"])
+                file_report["validation"]["success"] = is_valid
+                file_report["validation"]["syntax_msg"] = diag_msg
 
                 def validator_wrapper(fn: str, code: str):
+                    c_ok, c_msg = CompletenessValidator.validate(fn, fcontent, code)
+                    if not c_ok:
+                        return False, f"Completeness Check Failed: {c_msg}"
                     v_res = self.validator.validate_full(fn, fcontent, code)
                     return v_res["success"], "\n".join(v_res["diagnostics"])
 
-                # 3.5 Execution Loop: Retry Branch on Validation Failure
-                if not val_summary["success"]:
+                # 3.5 Execution Loop: Retry Branch on Failure
+                if not is_valid:
                     retry_start = time.perf_counter()
                     yield {
                         "file_name": fname,
                         "stage": "retry",
                         "status": "running",
-                        "message": "Validation failed! Entering Retry Loop..."
+                        "message": f"Validation failed ({diag_msg[:60]}...)! Entering Retry Loop..."
                     }
                     file_timing["Retry"] = "Yes"
 
                     repaired_ok, repaired_code, retry_logs = self.repairer.attempt_auto_fix(
-                        fname, fcontent, refactored_code, "\n".join(val_summary["diagnostics"]), validator_wrapper
+                        fname, fcontent, refactored_code, diag_msg, validator_wrapper
                     )
                     file_report["retries"] = retry_logs
                     file_report["validation"]["success"] = repaired_ok
@@ -291,7 +302,7 @@ class RefactoringOrchestrator:
                             "file_name": fname,
                             "stage": "retry",
                             "status": "failed",
-                            "message": "Auto-repair failed. Reverting to original code."
+                            "message": "Auto-repair failed. Reverting to original source code."
                         }
                 else:
                     file_timing["Retry"] = "No"

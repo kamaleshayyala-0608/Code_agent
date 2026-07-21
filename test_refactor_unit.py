@@ -165,6 +165,25 @@ def get_status():
         self.assertIn("metrics/quality_metrics.json", packaged)
         self.assertIn("suggestions/code_smells.json", packaged)
 
+    def test_completeness_validator(self):
+        from utils.completeness_validator import CompletenessValidator
+
+        original = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\n"
+        complete_refactored = "def line1():\n    pass\n# line2\n# line3\n# line4\n# line5\n# line6\n# line7\n# line8\n# line9\n# line10\n# line11\n# line12\n"
+        truncated_refactored = "def line1():\n    # ... existing code ...\n"
+        banned_refactored = "def line1():\n    pass\n# line2\n# line3\n# line4\n# line5\n# line6\n# line7\n# line8\n# line9\n# rest of file omitted\n# line11\n# line12\n"
+
+        ok1, _ = CompletenessValidator.validate("test.py", original, complete_refactored)
+        self.assertTrue(ok1)
+
+        ok2, msg2 = CompletenessValidator.validate("test.py", original, truncated_refactored)
+        self.assertFalse(ok2)
+        self.assertTrue("truncation" in msg2.lower() or "placeholder" in msg2.lower())
+
+        ok3, msg3 = CompletenessValidator.validate("test.py", original, banned_refactored)
+        self.assertFalse(ok3)
+        self.assertIn("banned", msg3.lower())
+
 if __name__ == '__main__':
     unittest.main()
 
