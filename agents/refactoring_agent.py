@@ -39,13 +39,12 @@ class RefactoringAgent(BaseAgent):
         system_prompt_pass1 = """You are an Expert Full-File Refactoring Engine (Pass 1: Safety & Structural Smells).
 Your task is to take the original source file and return the COMPLETE updated file where ALL Pass 1 refactorings are merged directly into the original code.
 
-CRITICAL INSTRUCTIONS:
-- Retain the ENTIRE original file structure, keeping all untouched imports, variables, functions, components, and logic completely intact.
-- Apply the refactoring guidelines directly in-place to the relevant sections.
-- Do NOT change public signatures unless strictly specified.
-- Do NOT rewrite from scratch or omit any unrelated code block, function, or line.
-- Do NOT write "...existing code...", snippets, diffs, guides, or explanations.
-- Return ONLY the COMPLETE refactored source code (original code + merged changes) wrapped in a code fence."""
+STRICT REQUIREMENTS:
+- Output the ENTIRE source file from line 1 to the end.
+- Do NOT output only changed functions, snippets, partial diffs, or summaries.
+- Keep ALL original imports, top-level constants, helper functions, classes, and unchanged code blocks in place.
+- Do NOT write "...existing code...", "...rest of file...", or drop any un-modified code.
+- Return ONLY the COMPLETE refactored source code wrapped in a code fence."""
 
         user_prompt_pass1 = f"""File Path: {file_name}
 
@@ -57,7 +56,7 @@ Original Full File Content:
 {original_code}
 ```
 
-Provide the COMPLETE refactored file content (original code with Pass 1 changes merged in):"""
+Provide the COMPLETE source code file (line 1 to end) with Pass 1 changes merged in:"""
 
         try:
             # Execute Pass 1
@@ -79,14 +78,14 @@ Provide the COMPLETE refactored file content (original code with Pass 1 changes 
             }
 
         system_prompt_pass2 = """You are an Expert Full-File Refactoring Engine (Pass 2: Performance & Architecture).
-Your task is to refine the Pass 1 code by applying Pass 2 refactorings directly in-place into the source code.
+Your task is to refine the Pass 1 code by applying Pass 2 refactorings directly into the source code.
 
-CRITICAL INSTRUCTIONS:
-- Retain the ENTIRE file structure, preserving all original untouched code, imports, functions, and components.
-- Apply the refactoring guidelines in-place to the relevant sections.
-- Do NOT skip any code block, write snippet fragments, or write "...existing code...".
-- Do NOT output guides, explanations, or conversations.
-- Return ONLY the COMPLETE refactored source code (original code + merged changes) wrapped in a code fence."""
+STRICT REQUIREMENTS:
+- Output the ENTIRE source file from line 1 to the end.
+- Do NOT output only changed functions, snippets, partial diffs, or summaries.
+- Retain all untouched imports, helper functions, classes, and original logic.
+- Do NOT write "...existing code...", "...rest of file...", or drop any un-modified code.
+- Return ONLY the COMPLETE refactored source code wrapped in a code fence."""
 
         user_prompt_pass2 = f"""File Path: {file_name}
 
@@ -98,7 +97,7 @@ Full File Content from Pass 1:
 {pass1_code}
 ```
 
-Provide the COMPLETE final refactored file content (original code with all changes merged in):"""
+Provide the COMPLETE final source code file (line 1 to end) with all changes merged in:"""
 
         try:
             # Execute Pass 2

@@ -56,7 +56,7 @@ CRITICAL INSTRUCTIONS:
 Please fix the file and return the complete corrected code."""
 
             try:
-                fixed_raw = self.run_prompt(system_prompt, user_prompt, num_predict=4096)
+                fixed_raw = self.run_prompt_complete(system_prompt, user_prompt, num_predict=4096)
                 current_code = clean_refactored_code(fixed_raw)
                 
                 # Re-validate
