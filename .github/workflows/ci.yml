@@ -28,10 +28,14 @@ jobs:
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --exclude=.git,__pycache__,venv,.venv,node_modules --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings.
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        flake8 . --exclude=.git,__pycache__,venv,.venv,node_modules --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Syntax Compilation Check
       run: |
         python -m py_compile app.py agent_core.py generators/cicd_generator.py
+
+    - name: Run Unit Tests
+      run: |
+        python -m unittest test_refactor_unit.py
