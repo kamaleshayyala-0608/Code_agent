@@ -14,7 +14,7 @@ class PlannerAgent:
         
         # Determine if refactoring is required
         clean_code = len(patterns) == 0 or (len(patterns) == 1 and patterns[0] == "Code Quality Opportunity")
-        should_refactor = not clean_code
+        should_refactor = True
         
         # Determine priority
         if "Circular Imports" in patterns or "Large Component" in patterns:
