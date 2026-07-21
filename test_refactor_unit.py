@@ -152,24 +152,23 @@ def get_status():
         }
         
         exporter = ExportAgent()
-        packaged = exporter.package_refactored_project(original_files, refactored_files, reports)
+        packaged = exporter.package_refactored_project(original_files, refactored_files, reports, spec_rules="# Refactoring Spec Rules")
         
-        # Verify ZIP folders and files are created
-        self.assertIn("Refactored_Project/app.py", packaged)
-        self.assertIn("Refactoring_Report/app.md", packaged)
-        self.assertIn("Planning/app_plan.json", packaged)
-        self.assertIn("Rules/app_rules.md", packaged)
-        self.assertIn("Pattern_Analysis/app_patterns.json", packaged)
-        self.assertIn("Validation/validation_report.json", packaged)
-        self.assertIn("Metrics/quality_metrics.json", packaged)
-        self.assertIn("SUMMARY.md", packaged)
-        
-        # Check SUMMARY.md contents
-        summary = packaged["SUMMARY.md"]
-        self.assertIn("Files Processed", summary)
-        self.assertIn("Files Refactored", summary)
-        self.assertIn("Average Score Before", summary)
-        self.assertIn("Average Score After", summary)
+        # Verify clean ZIP layout: only source files and spec.md
+        self.assertIn("app.py", packaged)
+        self.assertEqual(packaged["app.py"], "print('refactored')")
+        self.assertIn("spec.md", packaged)
+        self.assertIn("# Refactoring Spec Rules", packaged["spec.md"])
+
+        # Verify internal reports and folders are NOT exported in ZIP
+        self.assertNotIn("Refactored_Project/app.py", packaged)
+        self.assertNotIn("Refactoring_Report/app.md", packaged)
+        self.assertNotIn("Planning/app_plan.json", packaged)
+        self.assertNotIn("Rules/app_rules.md", packaged)
+        self.assertNotIn("Pattern_Analysis/app_patterns.json", packaged)
+        self.assertNotIn("Validation/validation_report.json", packaged)
+        self.assertNotIn("Metrics/quality_metrics.json", packaged)
+        self.assertNotIn("SUMMARY.md", packaged)
 
 if __name__ == '__main__':
     unittest.main()

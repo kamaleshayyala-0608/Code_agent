@@ -443,6 +443,11 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
             
             for full_key, content in task_data.items():
                 fname = full_key.replace("Refactored_Project/", "")
+                if fname == "spec.md":
+                    with st.expander("📖 Refactoring Specification (`spec.md`)", expanded=False):
+                        st.markdown(content)
+                    continue
+
                 file_report = reports.get(fname, {})
                 
                 qual_data = file_report.get("quality", {})

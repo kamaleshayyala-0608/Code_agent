@@ -408,12 +408,12 @@ class RefactoringOrchestrator:
         except Exception as e:
             # Re-attempt basic packaging on export failure
             try:
-                simple_packaged = {f"Refactored_Project/{k}": v for k, v in refactored_files.items()}
+                simple_packaged = {k.replace("\\", "/"): v for k, v in refactored_files.items()}
                 zip_bytes = self.exporter.build_zip_archive(simple_packaged)
                 yield {
                     "stage": "export",
                     "status": "completed",
-                    "message": f"Fallback packaging succeeded. (Full report export failed: {str(e)})",
+                    "message": f"Fallback packaging succeeded. ({str(e)})",
                     "data": {
                         "packaged_files": simple_packaged,
                         "zip_bytes": zip_bytes,
