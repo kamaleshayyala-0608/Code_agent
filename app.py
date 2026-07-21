@@ -397,7 +397,7 @@ with col1:
 # ---------------------------------------------------------------------------
 # Helper to render download controls and reports for each task
 # ---------------------------------------------------------------------------
-def _render_task_controls(task_name: str, task_data, active_code_payload: str):
+def _render_task_controls(task_name: str, task_data, active_code_payload: str, files_to_process: dict = None):
     if task_name == "Documentation":
         # task_data is a dict of {filepath: content}
         if task_data:
@@ -448,6 +448,8 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                         st.markdown(content)
                     continue
 
+                original_content = (files_to_process or {}).get(fname, "(Original content not available — this file was newly created during refactoring.)")
+
                 file_report = reports.get(fname, {})
                 
                 qual_data = file_report.get("quality", {})
@@ -477,7 +479,14 @@ def _render_task_controls(task_name: str, task_data, active_code_payload: str):
                             lang = "javascript"
                         elif lang == "py":
                             lang = "python"
-                        st.code(content, language=lang)
+
+                        col_old, col_new = st.columns(2)
+                        with col_old:
+                            st.markdown("**Original Code**")
+                            st.code(original_content, language=lang)
+                        with col_new:
+                            st.markdown("**Refactored Code**")
+                            st.code(content, language=lang)
                         
                     with tab_metrics:
                         if qual_data:
@@ -719,7 +728,7 @@ with col2:
                 status_text.success("🎉 Multi-Agent Refactoring Pipeline completed successfully!")
                 progress_bar.empty()
 
-                _render_task_controls("Refactor", refactor_results, active_code_payload)
+                _render_task_controls("Refactor", refactor_results, active_code_payload, files_to_process)
 
         # 3. Run Technical Documentation Pipeline (File-by-file + Global compiler)
         if do_document:
@@ -870,6 +879,7 @@ with col2:
         active_code_payload = final_code_payload
         if fast_mode and len(active_code_payload) > max_code_chars:
             active_code_payload = _trim_payload(active_code_payload, int(max_code_chars))
+        restored_files_to_process = _split_payload_into_files(active_code_payload)
 
         for task_name, header_text in task_configs:
             if task_name in st.session_state.pipeline_results:
@@ -880,7 +890,7 @@ with col2:
                     # For string data, we display markdown first
                     if isinstance(task_data, str):
                         st.markdown(task_data)
-                    _render_task_controls(task_name, task_data, active_code_payload)
+                    _render_task_controls(task_name, task_data, active_code_payload, restored_files_to_process)
 
         st.markdown("### ⏱️ Performance Metrics")
         scan_time = st.session_state.get("_last_scan_time", 0)
