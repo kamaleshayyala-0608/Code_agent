@@ -15,7 +15,7 @@ from core.cache_manager import CacheManager
 from core.tool_registry import ToolRegistry
 from utils.completeness_validator import CompletenessValidator
 from agents.planner_agent import PlannerAgent
-from agents.refactoring_agent import RefactoringAgent
+from agents.refactoring_agent import RefactoringAgent, TooLargeForSinglePassError
 from agents.validation_agent import ValidationAgent
 from agents.retry_agent import RetryAgent
 from agents.quality_agent import QualityEvaluationAgent
@@ -222,6 +222,30 @@ class RefactoringOrchestrator:
                     "status": "completed",
                     "data": refactored_code
                 }
+            except TooLargeForSinglePassError as e:
+                # Not a failure to retry — this file structurally cannot fit the
+                # single-pass strategy. Skip cleanly, keep the original content,
+                # and tell the user clearly instead of silently corrupting it.
+                refactored_code = fcontent
+                file_report["refactored_code"] = fcontent
+                file_report["validation"] = {
+                    "success": None,
+                    "syntax_msg": f"Skipped — too large for single-pass refactoring: {str(e)}",
+                    "behavior_msg": "Not attempted."
+                }
+                file_timing["Refactor"] = "Skipped (too large)"
+                yield {
+                    "file_name": fname,
+                    "stage": "refactoring",
+                    "status": "skipped",
+                    "message": f"Skipped `{fname}`: {str(e)}"
+                }
+                # Jump straight to quality/export bookkeeping — don't run this through
+                # completeness/behavior validation or the retry loop, both of which
+                # assume a genuine refactor attempt was made.
+                pipeline_details[fname] = file_report
+                refactored_files[fname] = fcontent
+                continue
             except Exception as e:
                 refactor_failed = True
                 refactored_code = fcontent

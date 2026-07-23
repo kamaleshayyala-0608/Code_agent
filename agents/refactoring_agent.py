@@ -1,9 +1,14 @@
 import os
 from typing import Dict, Any
 from agents.base_agent import BaseAgent
-from agent_core import clean_refactored_code, LocalCodeAgentEngine, compute_dynamic_token_budget
+from agent_core import clean_refactored_code, LocalCodeAgentEngine, compute_dynamic_token_budget, assess_single_pass_feasibility
 from core.tool_registry import ToolRegistry
 from utils.completeness_validator import CompletenessValidator
+
+class TooLargeForSinglePassError(Exception):
+    """Raised when a file is too large to fit input+output in the model's context window."""
+    pass
+
 
 class RefactoringAgent(BaseAgent):
     """
@@ -58,6 +63,17 @@ Original Source Code:
 ```
 
 Rewrite the COMPLETE source file from line 1 to the end:"""
+
+        # Pre-flight feasibility check (Item: prevent guaranteed truncation on large files) —
+        # the single-pass strategy needs the full original file AND a full rewritten output
+        # to both fit in context. If the input alone already eats the budget, refuse up front
+        # instead of firing the LLM call and getting back silently truncated/corrupted output.
+        extra_context = f"{self.spec_rules}\n{steps_md}\n{context.get('dependency_narrative', '')}"
+        feasible, feasibility_msg = assess_single_pass_feasibility(
+            original_code, system_instruction, extra_context, self.num_ctx
+        )
+        if not feasible:
+            raise TooLargeForSinglePassError(feasibility_msg)
 
         # Dynamic Token Budgeting based on line count (Item 9)
         token_budget = compute_dynamic_token_budget(original_code)

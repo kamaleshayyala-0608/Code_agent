@@ -292,7 +292,7 @@ with col1:
 
     ingest_mode = st.radio(
         "Select Code Source Input Mode:",
-        ["Direct Clipboard Paste", "Upload Multiple Files", "Scan Local POC Folder Path"],
+        ["Direct Clipboard Paste", "Upload Multiple Files", "Upload Project ZIP", "Scan Local POC Folder Path"],
         horizontal=True
     )
 
@@ -336,6 +336,55 @@ with col1:
                 file_contents.append(f"--- FILE: {uploaded_file.name} ---\n{string_data}\n")
             final_code_payload = "\n".join(file_contents)
             st.success(f"Successfully processed {len(uploaded_files)} file(s) into context window.")
+
+    # ---------------- MODE 2.5: PROJECT ZIP UPLOAD ----------------
+    elif ingest_mode == "Upload Project ZIP":
+        uploaded_zip = st.file_uploader(
+            "Choose a project ZIP file to upload",
+            type=["zip"]
+        )
+        if uploaded_zip:
+            import zipfile
+            import io
+            file_contents = []
+            try:
+                zip_data = uploaded_zip.read()
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+                    for zip_info in z.infolist():
+                        if zip_info.is_dir():
+                            continue
+                        
+                        fname = zip_info.filename
+                        # Standard exclusion checks
+                        if zip_info.file_size > 500 * 1024:  # 500 KB limit
+                            continue
+                            
+                        parts = fname.replace("\\", "/").split("/")
+                        if any(p.startswith(".") and p not in (".", "..") for p in parts):
+                            continue
+                        if any(p in {'node_modules', '__pycache__', 'env', 'venv', '.venv', 'build', 'dist', 'target', '.next', '.cache', 'coverage', 'vendor'} for p in parts):
+                            continue
+                            
+                        _, ext = os.path.splitext(fname.lower())
+                        valid_extensions = {
+                            '.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp',
+                            '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.sql', '.html', '.css', '.scss',
+                            '.sass', '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.cfg', '.md', '.txt',
+                            '.sh', '.bat', '.ps1'
+                        }
+                        if ext not in valid_extensions:
+                            continue
+                            
+                        try:
+                            string_data = z.read(zip_info).decode("utf-8")
+                        except UnicodeDecodeError:
+                            string_data = z.read(zip_info).decode("latin-1", errors="ignore")
+                            
+                        file_contents.append(f"--- FILE: {fname} ---\n{string_data}\n")
+                final_code_payload = "\n".join(file_contents)
+                st.success(f"Successfully processed {len(file_contents)} files from project ZIP into context window.")
+            except Exception as e:
+                st.error(f"Failed to read ZIP file: {str(e)}")
 
     # ---------------- MODE 3: LOCAL POC DIRECTORY ----------------
     elif ingest_mode == "Scan Local POC Folder Path":

@@ -1,7 +1,7 @@
 import os
 import re
 import ollama
-from typing import Dict, Any, Generator
+from typing import Dict, Any, Generator, Tuple
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,6 +24,31 @@ def compute_dynamic_token_budget(code: str) -> int:
         return 8192
     else:
         return 12288
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token) — good enough for a pre-flight budget check."""
+    return len(text) // 4 if text else 0
+
+def assess_single_pass_feasibility(original_code: str, system_prompt: str, extra_context: str, num_ctx: int) -> Tuple[bool, str]:
+    """
+    The single-pass 'rewrite the whole file' strategy requires the FULL original file
+    to fit in context alongside the system prompt, spec/context, AND the full output
+    (since a refactor is typically similar in size to the input). If input alone already
+    eats most of num_ctx, the call is guaranteed to truncate — so refuse up front instead
+    of silently producing corrupted/partial output.
+    """
+    input_tokens = estimate_tokens(original_code) + estimate_tokens(system_prompt) + estimate_tokens(extra_context)
+    # Reserve at least 25% of num_ctx for the output, and require the output budget to be
+    # at least 1024 tokens to be worth attempting.
+    available_for_output = num_ctx - input_tokens - 256  # 256 token safety margin
+    if available_for_output < max(1024, num_ctx * 0.25):
+        return False, (
+            f"File too large for single-pass refactoring: input alone is ~{input_tokens} tokens "
+            f"against a {num_ctx}-token context window, leaving insufficient room for a complete "
+            f"output. This file needs to be split into sections and refactored in multiple passes, "
+            f"or excluded from single-pass refactoring."
+        )
+    return True, "OK"
 
 def clean_refactored_code(text: str) -> str:
     """
