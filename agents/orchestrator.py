@@ -32,7 +32,7 @@ class RefactoringOrchestrator:
     Supports parallel processing, incremental refactoring, AST caching, and stage timing logs.
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         self.model_name = model_name
         self.scanner = ScannerAgent()
         self.parser = ParserAgent()

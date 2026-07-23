@@ -1,6 +1,6 @@
 # 🧠 Ollama-Powered Code Intelligence Agent
 
-An enterprise-grade local Code Review, Architecture Analysis, and Documentation tool. Built with Streamlit and powered by Ollama running local Large Language Models (defaults to `gemma4:26b`).
+An enterprise-grade local Code Review, Architecture Analysis, and Documentation tool. Built with Streamlit and powered by Ollama running local Large Language Models (defaults to `qwen3:8b`).
 
 This tool lets you ingest source code snippets, batch-upload files, or scan entire local directory structures, sending the parsed contents to a local Ollama daemon for analysis.
 
@@ -28,7 +28,7 @@ This tool lets you ingest source code snippets, batch-upload files, or scan enti
     *   Download from [ollama.com](https://ollama.com).
 2.  **Model:** Pull the configured LLM:
     ```bash
-    ollama pull gemma4:26b
+    ollama pull qwen3:8b
     ```
 
 ---

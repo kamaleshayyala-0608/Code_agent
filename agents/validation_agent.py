@@ -20,7 +20,7 @@ class ValidationAgent(BaseAgent):
     8. Basic Linter Check
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         super().__init__(model_name)
 
     def validate_full(self, file_name: str, original_code: str, refactored_code: str) -> Dict[str, Any]:

@@ -7,7 +7,7 @@ class PlannerAgent:
     before invoking the LLM transformation passes.
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         self.model_name = model_name
 
     def generate_plan(self, context: Dict[str, Any]) -> Dict[str, Any]:

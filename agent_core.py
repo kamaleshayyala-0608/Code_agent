@@ -5,7 +5,7 @@ from typing import Dict, Any, Generator, Tuple
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
-REQUIRED_MODEL_NAME = "gemma4:26b"
+REQUIRED_MODEL_NAME = "qwen3:8b"
 
 def compute_dynamic_token_budget(code: str) -> int:
     """

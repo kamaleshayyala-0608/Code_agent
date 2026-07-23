@@ -2,7 +2,7 @@ import ollama
 from typing import Dict, Any, Generator
 
 class BaseAgent:
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         self.model_name = model_name
         self.temperature = 0.0
         self.num_ctx = 32768

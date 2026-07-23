@@ -16,7 +16,7 @@ class RefactoringAgent(BaseAgent):
     with strict anti-truncation rules, dynamic token budgeting, and completeness validation.
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         super().__init__(model_name)
         self.spec_rules = ""
         spec_path = "memory/spec.md"

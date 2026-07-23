@@ -10,7 +10,7 @@ class RetryAgent(BaseAgent):
     Extends repair loop across 3 strategies.
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         super().__init__(model_name)
 
     def attempt_auto_fix(

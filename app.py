@@ -37,7 +37,7 @@ def get_agent_engine(model_name: str) -> LocalCodeAgentEngine:
             "💡 **Setup Suggestion:**\n"
             "1. Ensure you have Ollama installed.\n"
             "2. Start the local Ollama daemon (runs on `http://localhost:11434` by default).\n"
-            "3. Pull a model (e.g., `ollama pull gemma4:26b`) in your terminal.\n"
+            "3. Pull a model (e.g., `ollama pull qwen3:8b`) in your terminal.\n"
             "4. Refresh this page."
         )
         st.stop()
@@ -268,7 +268,7 @@ if MODEL_NAME not in available_models:
     st.error(f"Required Ollama model not found: `{MODEL_NAME}`")
     st.info(
         "Start Ollama, then install the required model with "
-        "`ollama pull gemma4:26b`, and refresh this page."
+        "`ollama pull qwen3:8b`, and refresh this page."
     )
     st.stop()
 

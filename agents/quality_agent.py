@@ -13,7 +13,7 @@ class QualityEvaluationAgent:
     - Overall Score (0-100)
     """
 
-    def __init__(self, model_name: str = "gemma4:26b"):
+    def __init__(self, model_name: str = "qwen3:8b"):
         self.model_name = model_name
 
     def evaluate_quality(

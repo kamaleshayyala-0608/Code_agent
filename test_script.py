@@ -3,9 +3,9 @@ from agent_core import LocalCodeAgentEngine
 
 def run_test():
     models = LocalCodeAgentEngine.list_available_models()
-    model_to_use = "gemma4:26b"
+    model_to_use = "qwen3:8b"
     if model_to_use not in models:
-        print("Required model not found. Start Ollama and run: ollama pull gemma4:26b")
+        print("Required model not found. Start Ollama and run: ollama pull qwen3:8b")
         return
     print(f"Using model: {model_to_use}")
     engine = LocalCodeAgentEngine(model_name=model_to_use)
