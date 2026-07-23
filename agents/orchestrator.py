@@ -96,9 +96,13 @@ class RefactoringOrchestrator:
             symbol_index = SymbolIndexBuilder.build_symbol_index(files, parsed_metadata)
             SymbolIndexBuilder.save_symbol_index_json(symbol_index)
 
-            # Load persistent memory spec.md
+            # Load the refactoring specification — single source of truth,
+            # same file agent_core.py and vector_db.py load from.
             spec_rules = ""
-            spec_path = "memory/spec.md"
+            spec_path = "rules/refactoring_spec.md"
+            if not os.path.exists(spec_path):
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                spec_path = os.path.join(base_dir, "rules", "refactoring_spec.md")
             if os.path.exists(spec_path):
                 with open(spec_path, "r", encoding="utf-8") as f:
                     spec_rules = f.read()
@@ -389,7 +393,7 @@ class RefactoringOrchestrator:
         }
 
         try:
-            packaged = self.exporter.package_refactored_project(files, refactored_files, pipeline_details)
+            packaged = self.exporter.package_refactored_project(files, refactored_files, pipeline_details, spec_rules=spec_rules)
             zip_bytes = self.exporter.build_zip_archive(packaged)
 
             yield {

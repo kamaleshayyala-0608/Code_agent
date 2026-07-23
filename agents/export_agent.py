@@ -33,6 +33,11 @@ class ExportAgent:
 
             packaged[fname_clean] = ref_code
 
+        # Include the specification that governed this refactor alongside the
+        # code so the download is self-documenting.
+        if spec_rules and spec_rules.strip():
+            packaged["spec.md"] = spec_rules
+
         return packaged
 
     def build_zip_archive(self, packaged_files: Dict[str, str]) -> bytes:
