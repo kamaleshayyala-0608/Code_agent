@@ -81,7 +81,11 @@ class BaseAgent:
                 chunk = str(response)
                 done_reason = None
 
-            full_content += chunk
+            import re
+            cleaned_chunk = chunk.strip()
+            cleaned_chunk = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", cleaned_chunk)
+            cleaned_chunk = re.sub(r"\s*```$", "", cleaned_chunk)
+            full_content += cleaned_chunk
 
             if done_reason != "length":
                 break  # model finished on its own — nothing was cut off
